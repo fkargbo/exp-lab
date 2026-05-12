@@ -1,0 +1,249 @@
+/* Scoped host + shadow UI — prefix everything under .exp-lab */
+.exp-lab-ui {
+  --exp-lab-bg: #ffffff;
+  --exp-lab-shadow: 0 4px 24px rgba(15, 23, 42, 0.08);
+  --exp-lab-border: #e8e8e8;
+  --exp-lab-text: #151515;
+  --exp-lab-muted: #6a6e73;
+  --exp-lab-accent: #0066cc;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--exp-lab-text);
+  box-sizing: border-box;
+}
+
+.exp-lab-ui *,
+.exp-lab-ui *::before,
+.exp-lab-ui *::after {
+  box-sizing: border-box;
+}
+
+.exp-lab-toast {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  background: var(--exp-lab-bg);
+  border: 1px solid var(--exp-lab-border);
+  border-radius: 10px;
+  padding: 10px 18px;
+  box-shadow: var(--exp-lab-shadow);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.exp-lab-toast strong {
+  font-weight: 600;
+}
+
+/*
+ * Dialog is portaled to document.body (outside `.exp-lab-ui`), so design tokens must be
+ * defined here or `var(--exp-lab-bg)` etc. resolve to transparent / wrong colors.
+ */
+.exp-lab-dialog-backdrop {
+  --exp-lab-bg: #ffffff;
+  --exp-lab-shadow: 0 4px 24px rgba(15, 23, 42, 0.08);
+  --exp-lab-border: #e8e8e8;
+  --exp-lab-text: #151515;
+  --exp-lab-muted: #6a6e73;
+  --exp-lab-accent: #0066cc;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.25);
+  /* Above pin layer; dialog stacks above interaction + shadow host */
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  pointer-events: auto;
+}
+
+.exp-lab-dialog {
+  width: min(420px, 100%);
+  background: var(--exp-lab-bg);
+  color: var(--exp-lab-text);
+  border-radius: 12px;
+  border: 1px solid var(--exp-lab-border);
+  box-shadow: var(--exp-lab-shadow);
+  padding: 20px;
+  max-height: min(80vh, 560px);
+  overflow: auto;
+}
+
+.exp-lab-dialog h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.exp-lab-field {
+  margin-bottom: 14px;
+}
+
+.exp-lab-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--exp-lab-muted);
+  margin-bottom: 6px;
+}
+
+.exp-lab-field input,
+.exp-lab-field textarea {
+  width: 100%;
+  border: 1px solid var(--exp-lab-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  cursor: text;
+}
+
+.exp-lab-field textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.exp-lab-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.exp-lab-actions--split {
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.exp-lab-btn {
+  appearance: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.exp-lab-btn--primary {
+  background: var(--exp-lab-accent);
+  color: #fff;
+}
+
+.exp-lab-btn--primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.exp-lab-btn--ghost {
+  background: #fff;
+  border-color: var(--exp-lab-border);
+  color: var(--exp-lab-text);
+}
+
+.exp-lab-btn--link {
+  background: transparent;
+  color: var(--exp-lab-accent);
+  padding-inline: 8px;
+}
+
+.exp-lab-btn--danger {
+  background: #fff;
+  border-color: #c9190b;
+  color: #c9190b;
+}
+
+.exp-lab-btn--danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.exp-lab-author-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--exp-lab-muted);
+}
+
+.exp-lab-pin-label {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: pointer;
+  overflow: hidden;
+  /* fill / border / shadow from inline styles (per-author palette in PinLayer) */
+}
+
+.exp-lab-pin-label img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.exp-lab-region {
+  position: absolute;
+  border-radius: 4px;
+  pointer-events: none;
+  /* border + tint from inline styles (matches pin author color) */
+}
+
+/*
+ * Active drag selection — dashed outline (portal layers are outside `.exp-lab-ui`, so avoid
+ * `var(--exp-lab-accent)` here or the border color may not resolve).
+ */
+.exp-lab-drag-marquee {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed #0066cc;
+  background: rgba(0, 102, 204, 0.1);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/*
+ * Must fill `#exp-lab-interaction-root` (explicit height from JS). Without height 100%,
+ * the absolutely positioned surface had zero height → no pointer hits / no cursor.
+ */
+.exp-lab-interaction-surface {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-height: 100%;
+  height: 100%;
+  cursor: inherit;
+}
+
+.exp-lab-debug {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  z-index: 2147483645;
+  font-size: 11px;
+  color: var(--exp-lab-muted);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--exp-lab-border);
+  max-width: min(90vw, 360px);
+  word-break: break-all;
+  pointer-events: none;
+}

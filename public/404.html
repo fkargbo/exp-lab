@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Redirecting…</title>
+    <script>
+      /**
+       * GitHub Pages SPA fallback: preserve client-route path after reload.
+       * Pair this with an index.html that reads sessionStorage and navigates (router-specific).
+       * Adjust BASE below if the site is served from a project subpath (e.g. /ExP-Lab/).
+       */
+      (function () {
+        var BASE = '';
+        var path = location.pathname + location.search + location.hash;
+        try {
+          sessionStorage.setItem('exp-lab-gh-pages-redirect', path);
+        } catch (e) {}
+        var target = location.origin + BASE + '/index.html';
+        location.replace(target);
+      })();
+    </script>
+  </head>
+  <body>
+    <p>Redirecting…</p>
+  </body>
+</html>
