@@ -30,7 +30,6 @@ function PinMarker({ pin, onOpen }: { pin: FeedbackPinRecord; onOpen: (p: Feedba
     left,
     top,
     ...chrome.markerStyle,
-    ...(pin.author_avatar_url ? { padding: 2 } : {}),
   };
 
   if (pin.kind === 'region' && pin.w_pct != null && pin.h_pct != null) {

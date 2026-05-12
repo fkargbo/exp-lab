@@ -1,8 +1,27 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Github } from 'lucide-react';
-import React, { useEffect, useState } from 'react';
+import { Github, X } from 'lucide-react';
+import type { MouseEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useExpLab } from '../context/ExpLabContext';
+
+function buildMergedComment(
+  savedComment: string,
+  editingOriginal: boolean,
+  originalDraft: string,
+  appendText: string,
+): string {
+  const saved = savedComment.trim();
+  const base = editingOriginal ? originalDraft.trim() : saved;
+  const append = appendText.trim();
+  if (append && base) {
+    return `${base}\n\n${append}`;
+  }
+  if (append) {
+    return append;
+  }
+  return base;
+}
 
 export function CommentDialog() {
   const {
@@ -18,6 +37,7 @@ export function CommentDialog() {
     closePinDetail,
     leaveFeedbackMode,
     deletePin,
+    updatePinComment,
   } = useExpLab();
 
   const [text, setText] = useState('');
@@ -27,6 +47,16 @@ export function CommentDialog() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+
+  const [editingOriginal, setEditingOriginal] = useState(false);
+  const [originalDraft, setOriginalDraft] = useState('');
+  const [appendText, setAppendText] = useState('');
+  const [savingDetail, setSavingDetail] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  const pendingCommentRef = useRef<HTMLTextAreaElement>(null);
+  const appendTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const originalEditRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -43,9 +73,59 @@ export function CommentDialog() {
   }, [pendingPin, guestName]);
 
   useEffect(() => {
+    if (!selectedPin) {
+      setOriginalDraft('');
+      setAppendText('');
+      setEditingOriginal(false);
+      return;
+    }
+    setOriginalDraft(selectedPin.comment_text ?? '');
+    setAppendText('');
+    setEditingOriginal(false);
+    setDetailError(null);
+  }, [selectedPin?.id]);
+
+  useEffect(() => {
+    if (!selectedPin || editingOriginal) {
+      return;
+    }
+    setOriginalDraft(selectedPin.comment_text ?? '');
+  }, [selectedPin?.comment_text, selectedPin, editingOriginal]);
+
+  useEffect(() => {
     setDeleteError(null);
     setDeleting(false);
   }, [selectedPin?.id]);
+
+  useLayoutEffect(() => {
+    if (!pendingPin) {
+      return;
+    }
+    const el = pendingCommentRef.current;
+    if (!el) {
+      return;
+    }
+    el.focus();
+  }, [pendingPin]);
+
+  useLayoutEffect(() => {
+    if (!selectedPin) {
+      return;
+    }
+    if (editingOriginal) {
+      const el = originalEditRef.current;
+      if (el) {
+        el.focus();
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      }
+      return;
+    }
+    const el = appendTextareaRef.current;
+    if (el) {
+      el.focus();
+    }
+  }, [selectedPin?.id, editingOriginal]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -61,6 +141,12 @@ export function CommentDialog() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, pendingPin, selectedPin, leaveFeedbackMode, closePinDetail]);
+
+  const detail = selectedPin;
+  const savedComment = detail?.comment_text ?? '';
+  const mergedPreview =
+    detail !== null ? buildMergedComment(savedComment, editingOriginal, originalDraft, appendText) : '';
+  const detailDirty = detail !== null && mergedPreview.trim() !== savedComment.trim();
 
   const onDeleteDetail = async () => {
     if (!detail) {
@@ -78,6 +164,41 @@ export function CommentDialog() {
     } finally {
       setDeleting(false);
     }
+  };
+
+  const onSaveDetail = async () => {
+    if (!detail) {
+      return;
+    }
+    const merged = buildMergedComment(savedComment, editingOriginal, originalDraft, appendText);
+    const trimmed = merged.trim();
+    if (!trimmed) {
+      setDetailError('Enter feedback in the field below, or use Edit to change existing text.');
+      return;
+    }
+    setSavingDetail(true);
+    setDetailError(null);
+    try {
+      await updatePinComment(detail.id, trimmed);
+      setAppendText('');
+      setEditingOriginal(false);
+      setOriginalDraft(trimmed);
+    } catch (e) {
+      setDetailError(e instanceof Error ? e.message : 'Could not save changes.');
+    } finally {
+      setSavingDetail(false);
+    }
+  };
+
+  const onCancelEditOriginal = () => {
+    if (!detail) {
+      return;
+    }
+    setEditingOriginal(false);
+    setOriginalDraft(detail.comment_text ?? '');
+    requestAnimationFrame(() => {
+      appendTextareaRef.current?.focus();
+    });
   };
 
   const onSubmit = async () => {
@@ -107,7 +228,13 @@ export function CommentDialog() {
     }
   };
 
-  const detail = selectedPin;
+  const dialogClose = () => {
+    if (pendingPin) {
+      leaveFeedbackMode();
+    } else if (selectedPin) {
+      closePinDetail();
+    }
+  };
 
   const dialogTree = (
     <AnimatePresence>
@@ -119,14 +246,17 @@ export function CommentDialog() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) {
-              if (pendingPin) {
-                leaveFeedbackMode();
-              } else if (selectedPin) {
-                closePinDetail();
-              }
+          onMouseDown={(e: MouseEvent) => {
+            if (e.target !== e.currentTarget) {
+              return;
             }
+            if (pendingPin && saving) {
+              return;
+            }
+            if (selectedPin && (savingDetail || deleting)) {
+              return;
+            }
+            dialogClose();
           }}
         >
           <motion.div
@@ -138,11 +268,22 @@ export function CommentDialog() {
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.96, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-            onMouseDown={(e) => e.stopPropagation()}
+            onMouseDown={(e: MouseEvent) => e.stopPropagation()}
           >
             {pendingPin ? (
               <>
-                <h2 id="exp-lab-dialog-title">Feedback</h2>
+                <div className="exp-lab-dialog-header-row exp-lab-dialog-header-row--tight">
+                  <h2 id="exp-lab-dialog-title">Feedback</h2>
+                  <button
+                    type="button"
+                    className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--icon exp-lab-dialog-close"
+                    aria-label="Close"
+                    onClick={() => leaveFeedbackMode()}
+                    disabled={saving}
+                  >
+                    <X size={20} aria-hidden />
+                  </button>
+                </div>
                 <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--exp-lab-muted)' }}>
                   {pendingPin.kind === 'region' ? 'Area highlight' : 'Pin'} · Project{' '}
                   <code>{window.location.pathname}</code>
@@ -198,6 +339,7 @@ export function CommentDialog() {
                 <div className="exp-lab-field">
                   <label htmlFor="exp-lab-comment">Comment</label>
                   <textarea
+                    ref={pendingCommentRef}
                     id="exp-lab-comment"
                     value={text}
                     onChange={(e) => setText(e.target.value)}
@@ -212,14 +354,6 @@ export function CommentDialog() {
                 ) : null}
 
                 <div className="exp-lab-actions">
-                  <button
-                    type="button"
-                    className="exp-lab-btn exp-lab-btn--ghost"
-                    onClick={() => leaveFeedbackMode()}
-                    disabled={saving}
-                  >
-                    Cancel
-                  </button>
                   <button type="button" className="exp-lab-btn exp-lab-btn--primary" onClick={() => void onSubmit()} disabled={saving}>
                     {saving ? 'Saving…' : 'Post feedback'}
                   </button>
@@ -229,7 +363,19 @@ export function CommentDialog() {
 
             {detail ? (
               <>
-                <h2 id="exp-lab-dialog-title">Feedback</h2>
+                <div className="exp-lab-dialog-header-row exp-lab-dialog-header-row--tight">
+                  <h2 id="exp-lab-dialog-title">Feedback</h2>
+                  <button
+                    type="button"
+                    className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--icon exp-lab-dialog-close"
+                    aria-label="Close"
+                    onClick={closePinDetail}
+                    disabled={deleting || savingDetail}
+                  >
+                    <X size={20} aria-hidden />
+                  </button>
+                </div>
+
                 <div className="exp-lab-author-row">
                   {detail.author_avatar_url ? (
                     <img src={detail.author_avatar_url} alt="" width={28} height={28} style={{ borderRadius: '50%' }} />
@@ -239,26 +385,78 @@ export function CommentDialog() {
                     {detail.author_github_id ? ` · @${detail.author_github_id}` : null}
                   </span>
                 </div>
-                <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{detail.comment_text || '—'}</p>
-                <p style={{ fontSize: 12, color: 'var(--exp-lab-muted)', marginTop: 12 }}>
-                  {new Date(detail.created_at).toLocaleString()}
-                </p>
+
+                <div className="exp-lab-field exp-lab-field--tight">
+                  <span className="exp-lab-field-label">Existing feedback</span>
+                  {editingOriginal ? (
+                    <div className="exp-lab-original-edit-wrap">
+                      <textarea
+                        ref={originalEditRef}
+                        id="exp-lab-comment-original"
+                        className="exp-lab-textarea-compact"
+                        value={originalDraft}
+                        onChange={(e) => setOriginalDraft(e.target.value)}
+                        aria-label="Edit existing feedback"
+                      />
+                      <button type="button" className="exp-lab-btn exp-lab-btn--link exp-lab-btn--inline" onClick={onCancelEditOriginal}>
+                        Cancel edit
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="exp-lab-feedback-body-row">
+                      <div className="exp-lab-feedback-readonly" id="exp-lab-feedback-readonly">
+                        {savedComment.trim() ? savedComment : <span className="exp-lab-muted-inline">No comment text yet.</span>}
+                      </div>
+                      <button
+                        type="button"
+                        className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--sm"
+                        onClick={() => setEditingOriginal(true)}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  )}
+                  <p className="exp-lab-detail-meta">Posted {new Date(detail.created_at).toLocaleString()}</p>
+                </div>
+
+                <div className="exp-lab-field">
+                  <label htmlFor="exp-lab-comment-append">Add more feedback</label>
+                  <textarea
+                    ref={appendTextareaRef}
+                    id="exp-lab-comment-append"
+                    value={appendText}
+                    onChange={(e) => setAppendText(e.target.value)}
+                    placeholder="Type additional notes here…"
+                  />
+                </div>
+
+                {detailError ? (
+                  <p style={{ color: '#c9190b', fontSize: 13, marginTop: 8 }} role="alert">
+                    {detailError}
+                  </p>
+                ) : null}
                 {deleteError ? (
                   <p style={{ color: '#c9190b', fontSize: 13, marginTop: 8 }} role="alert">
                     {deleteError}
                   </p>
                 ) : null}
-                <div className="exp-lab-actions exp-lab-actions--split">
+
+                <div className="exp-lab-actions-detail exp-lab-actions-detail--end">
                   <button
                     type="button"
                     className="exp-lab-btn exp-lab-btn--danger"
                     onClick={() => void onDeleteDetail()}
-                    disabled={deleting}
+                    disabled={deleting || savingDetail}
                   >
                     {deleting ? 'Deleting…' : 'Delete'}
                   </button>
-                  <button type="button" className="exp-lab-btn exp-lab-btn--primary" onClick={closePinDetail} disabled={deleting}>
-                    Close
+                  <button
+                    type="button"
+                    className="exp-lab-btn exp-lab-btn--primary"
+                    onClick={() => void onSaveDetail()}
+                    disabled={!detailDirty || savingDetail || deleting || !mergedPreview.trim()}
+                  >
+                    {savingDetail ? 'Saving…' : 'Save changes'}
                   </button>
                 </div>
               </>
@@ -269,7 +467,6 @@ export function CommentDialog() {
     </AnimatePresence>
   );
 
-  /* Portal outside Shadow DOM — pointer-events:none on the host was blocking real clicks on inputs. */
   if (!mounted || typeof document === 'undefined') {
     return null;
   }

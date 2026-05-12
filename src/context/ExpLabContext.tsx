@@ -16,6 +16,7 @@ import {
   getLocalFeedbackStorageKey,
   loadLocalPins,
   removeLocalPin,
+  updateLocalPinComment,
 } from '../lib/localFeedbackStore';
 import { getStoredGuestName, setStoredGuestName } from '../lib/storage';
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
@@ -60,6 +61,8 @@ type ExpLabContextValue = {
   selectedPin: FeedbackPinRecord | null;
   openPinDetail: (pin: FeedbackPinRecord) => void;
   closePinDetail: () => void;
+  /** Persist updated comment text for an existing pin (Supabase or local storage). */
+  updatePinComment: (pinId: string, newCommentText: string) => Promise<void>;
   /** Remove a saved pin (Supabase or local storage). Closes detail view on success. */
   deletePin: (pinId: string) => Promise<void>;
   dragRect: DragRect | null;
@@ -417,6 +420,35 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     [supabase, projectId, loadPins],
   );
 
+  const updatePinComment = useCallback(
+    async (pinId: string, newCommentText: string) => {
+      const trimmed = newCommentText.trim();
+      if (!trimmed) {
+        throw new Error('Enter a comment.');
+      }
+      if (!supabase) {
+        updateLocalPinComment(projectId, pinId, trimmed);
+        setPins(loadLocalPins(projectId));
+        setSelectedPin((prev) =>
+          prev && prev.id === pinId ? { ...prev, comment_text: trimmed } : prev,
+        );
+        return;
+      }
+      const { error } = await supabase
+        .from('feedback_pins')
+        .update({ comment_text: trimmed })
+        .eq('id', pinId);
+      if (error) {
+        throw new Error(error.message);
+      }
+      setSelectedPin((prev) =>
+        prev && prev.id === pinId ? { ...prev, comment_text: trimmed } : prev,
+      );
+      void loadPins();
+    },
+    [supabase, projectId, loadPins],
+  );
+
   const submitComment = useCallback(
     async (text: string) => {
       if (!pendingPin) {
@@ -509,6 +541,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     selectedPin,
     openPinDetail,
     closePinDetail,
+    updatePinComment,
     deletePin,
     dragRect,
     syncPinLayerHeight,

@@ -59,6 +59,13 @@ export function removeLocalPin(projectId: string, pinId: string): void {
   saveLocalPins(projectId, list);
 }
 
+export function updateLocalPinComment(projectId: string, pinId: string, commentText: string): void {
+  const list = loadLocalPins(projectId).map((p) =>
+    p.id === pinId ? { ...p, comment_text: commentText } : p,
+  );
+  saveLocalPins(projectId, list);
+}
+
 export function createLocalPinId(): string {
   return newId();
 }
