@@ -14,6 +14,7 @@ create table if not exists public.feedback_pins (
   w_pct double precision,
   h_pct double precision,
   comment_text text not null default '',
+  comment_entries jsonb not null default '[]'::jsonb,
   prototype_url text,
   author_name text,
   author_avatar_url text,

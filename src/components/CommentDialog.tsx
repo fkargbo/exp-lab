@@ -4,23 +4,46 @@ import type { MouseEvent } from 'react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useExpLab } from '../context/ExpLabContext';
+import { getPinThreadEntries } from '../lib/pinThread';
+import type { FeedbackThreadEntry } from '../types';
 
-function buildMergedComment(
-  savedComment: string,
-  editingOriginal: boolean,
-  originalDraft: string,
-  appendText: string,
-): string {
-  const saved = savedComment.trim();
-  const base = editingOriginal ? originalDraft.trim() : saved;
-  const append = appendText.trim();
-  if (append && base) {
-    return `${base}\n\n${append}`;
+function initials(name: string | null): string {
+  if (!name?.trim()) {
+    return '?';
   }
-  if (append) {
-    return append;
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
   }
-  return base;
+  return name.slice(0, 2).toUpperCase();
+}
+
+function ThreadEntryRow({ entry }: { entry: FeedbackThreadEntry }) {
+  return (
+    <div className="exp-lab-thread-entry">
+      <div className="exp-lab-thread-entry__avatar">
+        {entry.author_avatar_url ? (
+          <img src={entry.author_avatar_url} alt="" width={36} height={36} />
+        ) : (
+          <span className="exp-lab-thread-entry__initials" aria-hidden>
+            {initials(entry.author_name)}
+          </span>
+        )}
+      </div>
+      <div className="exp-lab-thread-entry__main">
+        <div className="exp-lab-thread-entry__meta">
+          <strong>{entry.author_name ?? 'Guest'}</strong>
+          {entry.author_github_id ? (
+            <span className="exp-lab-thread-entry__handle"> · @{entry.author_github_id}</span>
+          ) : null}
+          <time className="exp-lab-thread-entry__time" dateTime={entry.created_at}>
+            {new Date(entry.created_at).toLocaleString()}
+          </time>
+        </div>
+        <div className="exp-lab-thread-entry__text">{entry.body}</div>
+      </div>
+    </div>
+  );
 }
 
 export function CommentDialog() {
@@ -37,7 +60,7 @@ export function CommentDialog() {
     closePinDetail,
     leaveFeedbackMode,
     deletePin,
-    updatePinComment,
+    appendPinFeedback,
   } = useExpLab();
 
   const [text, setText] = useState('');
@@ -48,15 +71,12 @@ export function CommentDialog() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
 
-  const [editingOriginal, setEditingOriginal] = useState(false);
-  const [originalDraft, setOriginalDraft] = useState('');
   const [appendText, setAppendText] = useState('');
-  const [savingDetail, setSavingDetail] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
+  const [savingAppend, setSavingAppend] = useState(false);
+  const [appendError, setAppendError] = useState<string | null>(null);
 
   const pendingCommentRef = useRef<HTMLTextAreaElement>(null);
   const appendTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const originalEditRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -74,23 +94,12 @@ export function CommentDialog() {
 
   useEffect(() => {
     if (!selectedPin) {
-      setOriginalDraft('');
       setAppendText('');
-      setEditingOriginal(false);
       return;
     }
-    setOriginalDraft(selectedPin.comment_text ?? '');
     setAppendText('');
-    setEditingOriginal(false);
-    setDetailError(null);
+    setAppendError(null);
   }, [selectedPin?.id]);
-
-  useEffect(() => {
-    if (!selectedPin || editingOriginal) {
-      return;
-    }
-    setOriginalDraft(selectedPin.comment_text ?? '');
-  }, [selectedPin?.comment_text, selectedPin, editingOriginal]);
 
   useEffect(() => {
     setDeleteError(null);
@@ -112,20 +121,8 @@ export function CommentDialog() {
     if (!selectedPin) {
       return;
     }
-    if (editingOriginal) {
-      const el = originalEditRef.current;
-      if (el) {
-        el.focus();
-        const len = el.value.length;
-        el.setSelectionRange(len, len);
-      }
-      return;
-    }
-    const el = appendTextareaRef.current;
-    if (el) {
-      el.focus();
-    }
-  }, [selectedPin?.id, editingOriginal]);
+    appendTextareaRef.current?.focus();
+  }, [selectedPin?.id]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -143,16 +140,13 @@ export function CommentDialog() {
   }, [open, pendingPin, selectedPin, leaveFeedbackMode, closePinDetail]);
 
   const detail = selectedPin;
-  const savedComment = detail?.comment_text ?? '';
-  const mergedPreview =
-    detail !== null ? buildMergedComment(savedComment, editingOriginal, originalDraft, appendText) : '';
-  const detailDirty = detail !== null && mergedPreview.trim() !== savedComment.trim();
+  const threadEntries = detail ? getPinThreadEntries(detail) : [];
 
   const onDeleteDetail = async () => {
     if (!detail) {
       return;
     }
-    if (!window.confirm('Delete this feedback? This cannot be undone.')) {
+    if (!window.confirm('Delete this pin and all feedback on it? This cannot be undone.')) {
       return;
     }
     setDeleting(true);
@@ -166,39 +160,31 @@ export function CommentDialog() {
     }
   };
 
-  const onSaveDetail = async () => {
+  const onPostAppend = async () => {
     if (!detail) {
       return;
     }
-    const merged = buildMergedComment(savedComment, editingOriginal, originalDraft, appendText);
-    const trimmed = merged.trim();
-    if (!trimmed) {
-      setDetailError('Enter feedback in the field below, or use Edit to change existing text.');
-      return;
-    }
-    setSavingDetail(true);
-    setDetailError(null);
+    setSavingAppend(true);
+    setAppendError(null);
     try {
-      await updatePinComment(detail.id, trimmed);
+      if (!authorDisplay && !(nameInput.trim() || guestName?.trim())) {
+        throw new Error(
+          persistenceMode === 'local' ? 'Enter your name.' : 'Enter your name or sign in with GitHub.',
+        );
+      }
+      if (!appendText.trim()) {
+        throw new Error('Enter your feedback message.');
+      }
+      if (!authorDisplay && nameInput.trim()) {
+        setGuestName(nameInput.trim());
+      }
+      await appendPinFeedback(detail.id, appendText);
       setAppendText('');
-      setEditingOriginal(false);
-      setOriginalDraft(trimmed);
     } catch (e) {
-      setDetailError(e instanceof Error ? e.message : 'Could not save changes.');
+      setAppendError(e instanceof Error ? e.message : 'Could not post feedback.');
     } finally {
-      setSavingDetail(false);
+      setSavingAppend(false);
     }
-  };
-
-  const onCancelEditOriginal = () => {
-    if (!detail) {
-      return;
-    }
-    setEditingOriginal(false);
-    setOriginalDraft(detail.comment_text ?? '');
-    requestAnimationFrame(() => {
-      appendTextareaRef.current?.focus();
-    });
   };
 
   const onSubmit = async () => {
@@ -253,7 +239,7 @@ export function CommentDialog() {
             if (pendingPin && saving) {
               return;
             }
-            if (selectedPin && (savingDetail || deleting)) {
+            if (selectedPin && (savingAppend || deleting)) {
               return;
             }
             dialogClose();
@@ -370,69 +356,93 @@ export function CommentDialog() {
                     className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--icon exp-lab-dialog-close"
                     aria-label="Close"
                     onClick={closePinDetail}
-                    disabled={deleting || savingDetail}
+                    disabled={deleting || savingAppend}
                   >
                     <X size={20} aria-hidden />
                   </button>
                 </div>
 
-                <div className="exp-lab-author-row">
-                  {detail.author_avatar_url ? (
-                    <img src={detail.author_avatar_url} alt="" width={28} height={28} style={{ borderRadius: '50%' }} />
-                  ) : null}
-                  <span>
-                    <strong>{detail.author_name ?? 'Guest'}</strong>
-                    {detail.author_github_id ? ` · @${detail.author_github_id}` : null}
-                  </span>
-                </div>
+                <p className="exp-lab-detail-meta" style={{ marginTop: 0 }}>
+                  Pin placed {new Date(detail.created_at).toLocaleString()}
+                </p>
 
                 <div className="exp-lab-field exp-lab-field--tight">
-                  <span className="exp-lab-field-label">Existing feedback</span>
-                  {editingOriginal ? (
-                    <div className="exp-lab-original-edit-wrap">
-                      <textarea
-                        ref={originalEditRef}
-                        id="exp-lab-comment-original"
-                        className="exp-lab-textarea-compact"
-                        value={originalDraft}
-                        onChange={(e) => setOriginalDraft(e.target.value)}
-                        aria-label="Edit existing feedback"
-                      />
-                      <button type="button" className="exp-lab-btn exp-lab-btn--link exp-lab-btn--inline" onClick={onCancelEditOriginal}>
-                        Cancel edit
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="exp-lab-feedback-body-row">
-                      <div className="exp-lab-feedback-readonly" id="exp-lab-feedback-readonly">
-                        {savedComment.trim() ? savedComment : <span className="exp-lab-muted-inline">No comment text yet.</span>}
-                      </div>
-                      <button
-                        type="button"
-                        className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--sm"
-                        onClick={() => setEditingOriginal(true)}
-                      >
-                        Edit
-                      </button>
-                    </div>
-                  )}
-                  <p className="exp-lab-detail-meta">Posted {new Date(detail.created_at).toLocaleString()}</p>
+                  <span className="exp-lab-field-label">Feedback thread</span>
+                  <div className="exp-lab-thread-list" role="list">
+                    {threadEntries.length === 0 ? (
+                      <p className="exp-lab-muted-inline" style={{ margin: '8px 0' }}>
+                        No messages yet. Add feedback below.
+                      </p>
+                    ) : (
+                      threadEntries.map((entry) => (
+                        <div key={entry.id} role="listitem">
+                          <ThreadEntryRow entry={entry} />
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
 
+                {persistenceMode === 'supabase' ? (
+                  <div className="exp-lab-author-row">
+                    {authorDisplay ? (
+                      <>
+                        {authorDisplay.avatarUrl ? (
+                          <img
+                            src={authorDisplay.avatarUrl}
+                            alt=""
+                            width={28}
+                            height={28}
+                            style={{ borderRadius: '50%' }}
+                          />
+                        ) : null}
+                        <span>
+                          Adding as <strong>{authorDisplay.name}</strong>
+                        </span>
+                        <button type="button" className="exp-lab-btn exp-lab-btn--link" onClick={() => void signOut()}>
+                          Sign out
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" className="exp-lab-btn exp-lab-btn--ghost" onClick={() => void signInWithGitHub()}>
+                        <Github size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} aria-hidden />
+                        Sign in with GitHub
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <p style={{ fontSize: 13, color: 'var(--exp-lab-muted)', marginBottom: 12 }}>
+                    Local-only mode — thread is stored in this browser.
+                  </p>
+                )}
+
+                {!authorDisplay ? (
+                  <div className="exp-lab-field">
+                    <label htmlFor="exp-lab-name-detail">Your name</label>
+                    <input
+                      id="exp-lab-name-detail"
+                      value={nameInput}
+                      onChange={(e) => setNameInput(e.target.value)}
+                      placeholder="Guest name"
+                      autoComplete="name"
+                    />
+                  </div>
+                ) : null}
+
                 <div className="exp-lab-field">
-                  <label htmlFor="exp-lab-comment-append">Add more feedback</label>
+                  <label htmlFor="exp-lab-comment-append">Add feedback</label>
                   <textarea
                     ref={appendTextareaRef}
                     id="exp-lab-comment-append"
                     value={appendText}
                     onChange={(e) => setAppendText(e.target.value)}
-                    placeholder="Type additional notes here…"
+                    placeholder="Write a message for this thread…"
                   />
                 </div>
 
-                {detailError ? (
+                {appendError ? (
                   <p style={{ color: '#c9190b', fontSize: 13, marginTop: 8 }} role="alert">
-                    {detailError}
+                    {appendError}
                   </p>
                 ) : null}
                 {deleteError ? (
@@ -446,17 +456,17 @@ export function CommentDialog() {
                     type="button"
                     className="exp-lab-btn exp-lab-btn--danger"
                     onClick={() => void onDeleteDetail()}
-                    disabled={deleting || savingDetail}
+                    disabled={deleting || savingAppend}
                   >
-                    {deleting ? 'Deleting…' : 'Delete'}
+                    {deleting ? 'Deleting…' : 'Delete pin'}
                   </button>
                   <button
                     type="button"
                     className="exp-lab-btn exp-lab-btn--primary"
-                    onClick={() => void onSaveDetail()}
-                    disabled={!detailDirty || savingDetail || deleting || !mergedPreview.trim()}
+                    onClick={() => void onPostAppend()}
+                    disabled={!appendText.trim() || savingAppend || deleting}
                   >
-                    {savingDetail ? 'Saving…' : 'Save changes'}
+                    {savingAppend ? 'Posting…' : 'Post feedback'}
                   </button>
                 </div>
               </>

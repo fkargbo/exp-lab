@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { FeedbackPinRecord } from '../types';
 import { useExpLab } from '../context/ExpLabContext';
 import { getPinChrome } from '../lib/authorPinColor';
+import { getPinMarkerAuthor } from '../lib/pinThread';
 
 function initials(name: string | null): string {
   if (!name?.trim()) {
@@ -17,6 +18,7 @@ function initials(name: string | null): string {
 
 function PinMarker({ pin, onOpen }: { pin: FeedbackPinRecord; onOpen: (p: FeedbackPinRecord) => void }) {
   const chrome = getPinChrome(pin);
+  const markerAuthor = getPinMarkerAuthor(pin);
   let leftPct = pin.x_pct;
   let topPct = pin.y_pct;
   if (pin.kind === 'region' && pin.w_pct != null && pin.h_pct != null) {
@@ -56,10 +58,10 @@ function PinMarker({ pin, onOpen }: { pin: FeedbackPinRecord; onOpen: (p: Feedba
           }}
           aria-label={`Open comment from ${pin.author_name ?? 'Guest'}`}
         >
-          {pin.author_avatar_url ? (
-            <img src={pin.author_avatar_url} alt="" />
+          {markerAuthor.avatarUrl ? (
+            <img src={markerAuthor.avatarUrl} alt="" />
           ) : (
-            initials(pin.author_name)
+            initials(markerAuthor.name)
           )}
         </button>
       </React.Fragment>
@@ -79,7 +81,7 @@ function PinMarker({ pin, onOpen }: { pin: FeedbackPinRecord; onOpen: (p: Feedba
       }}
       aria-label={`Open comment from ${pin.author_name ?? 'Guest'}`}
     >
-      {pin.author_avatar_url ? <img src={pin.author_avatar_url} alt="" /> : initials(pin.author_name)}
+      {markerAuthor.avatarUrl ? <img src={markerAuthor.avatarUrl} alt="" /> : initials(markerAuthor.name)}
     </button>
   );
 }

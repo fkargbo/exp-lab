@@ -1,4 +1,5 @@
-import type { FeedbackPinRecord } from '../types';
+import type { FeedbackPinRecord, FeedbackThreadEntry } from '../types';
+import { getPinThreadEntries, threadBodiesJoined } from './pinThread';
 
 const PREFIX = 'exp-lab-feedback:v1:';
 
@@ -59,10 +60,27 @@ export function removeLocalPin(projectId: string, pinId: string): void {
   saveLocalPins(projectId, list);
 }
 
-export function updateLocalPinComment(projectId: string, pinId: string, commentText: string): void {
-  const list = loadLocalPins(projectId).map((p) =>
-    p.id === pinId ? { ...p, comment_text: commentText } : p,
-  );
+/** Append a thread message; syncs `comment_text` and pin-level author to latest poster. */
+export function appendLocalPinEntry(
+  projectId: string,
+  pinId: string,
+  entry: FeedbackThreadEntry,
+): void {
+  const list = loadLocalPins(projectId).map((p) => {
+    if (p.id !== pinId) {
+      return p;
+    }
+    const prev = getPinThreadEntries(p);
+    const next = [...prev, entry];
+    return {
+      ...p,
+      comment_entries: next,
+      comment_text: threadBodiesJoined(next),
+      author_name: entry.author_name,
+      author_avatar_url: entry.author_avatar_url,
+      author_github_id: entry.author_github_id,
+    };
+  });
   saveLocalPins(projectId, list);
 }
 

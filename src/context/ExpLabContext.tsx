@@ -12,12 +12,13 @@ import type { AuthorInfo, FeedbackPinKind, FeedbackPinRecord } from '../types';
 import { getCanonicalPrototypeUrl, getProjectId } from '../lib/projectId';
 import {
   appendLocalPin,
+  appendLocalPinEntry,
   createLocalPinId,
   getLocalFeedbackStorageKey,
   loadLocalPins,
   removeLocalPin,
-  updateLocalPinComment,
 } from '../lib/localFeedbackStore';
+import { createThreadEntry, getPinThreadEntries, threadBodiesJoined } from '../lib/pinThread';
 import { getStoredGuestName, setStoredGuestName } from '../lib/storage';
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 
@@ -61,8 +62,8 @@ type ExpLabContextValue = {
   selectedPin: FeedbackPinRecord | null;
   openPinDetail: (pin: FeedbackPinRecord) => void;
   closePinDetail: () => void;
-  /** Persist updated comment text for an existing pin (Supabase or local storage). */
-  updatePinComment: (pinId: string, newCommentText: string) => Promise<void>;
+  /** Append a new thread message on an existing pin (Supabase or local storage). */
+  appendPinFeedback: (pinId: string, text: string) => Promise<void>;
   /** Remove a saved pin (Supabase or local storage). Closes detail view on success. */
   deletePin: (pinId: string) => Promise<void>;
   dragRect: DragRect | null;
@@ -420,33 +421,79 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     [supabase, projectId, loadPins],
   );
 
-  const updatePinComment = useCallback(
-    async (pinId: string, newCommentText: string) => {
-      const trimmed = newCommentText.trim();
+  const appendPinFeedback = useCallback(
+    async (pinId: string, text: string) => {
+      const trimmed = text.trim();
       if (!trimmed) {
         throw new Error('Enter a comment.');
       }
+      const pin = pins.find((p) => p.id === pinId) ?? (selectedPin?.id === pinId ? selectedPin : undefined);
+      if (!pin) {
+        throw new Error('Pin not found.');
+      }
+
+      const author = authorFromUser(user);
+      let author_name: string | null = author?.name ?? null;
+      let author_avatar_url: string | null = author?.avatarUrl ?? null;
+      let author_github_id: string | null = author?.githubId ?? null;
+
+      if (!author_name) {
+        const g = guestName?.trim() || getStoredGuestName()?.trim();
+        if (!g) {
+          throw new Error('Name required');
+        }
+        author_name = g;
+        setGuestName(g);
+        author_avatar_url = null;
+        author_github_id = null;
+      }
+
+      const entry = createThreadEntry(trimmed, {
+        name: author_name,
+        avatarUrl: author_avatar_url,
+        githubId: author_github_id,
+      });
+      const merged = [...getPinThreadEntries(pin), entry];
+      const joined = threadBodiesJoined(merged);
+
       if (!supabase) {
-        updateLocalPinComment(projectId, pinId, trimmed);
+        appendLocalPinEntry(projectId, pinId, entry);
+        const fresh = loadLocalPins(projectId).find((p) => p.id === pinId);
+        if (fresh) {
+          setSelectedPin(fresh);
+        }
         setPins(loadLocalPins(projectId));
-        setSelectedPin((prev) =>
-          prev && prev.id === pinId ? { ...prev, comment_text: trimmed } : prev,
-        );
         return;
       }
+
       const { error } = await supabase
         .from('feedback_pins')
-        .update({ comment_text: trimmed })
+        .update({
+          comment_entries: merged,
+          comment_text: joined,
+          author_name: entry.author_name,
+          author_avatar_url: entry.author_avatar_url,
+          author_github_id: entry.author_github_id,
+        })
         .eq('id', pinId);
       if (error) {
         throw new Error(error.message);
       }
       setSelectedPin((prev) =>
-        prev && prev.id === pinId ? { ...prev, comment_text: trimmed } : prev,
+        prev && prev.id === pinId
+          ? {
+              ...prev,
+              comment_entries: merged,
+              comment_text: joined,
+              author_name: entry.author_name,
+              author_avatar_url: entry.author_avatar_url,
+              author_github_id: entry.author_github_id,
+            }
+          : prev,
       );
       void loadPins();
     },
-    [supabase, projectId, loadPins],
+    [supabase, projectId, pins, selectedPin, user, guestName, setGuestName, loadPins],
   );
 
   const submitComment = useCallback(
@@ -470,10 +517,17 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
         author_github_id = null;
       }
 
+      const entry = createThreadEntry(text.trim(), {
+        name: author_name,
+        avatarUrl: author_avatar_url,
+        githubId: author_github_id,
+      });
+
       const base = {
         project_id: projectId,
         prototype_url: getCanonicalPrototypeUrl(),
-        comment_text: text.trim(),
+        comment_text: entry.body,
+        comment_entries: [entry],
         author_name,
         author_avatar_url,
         author_github_id,
@@ -541,7 +595,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     selectedPin,
     openPinDetail,
     closePinDetail,
-    updatePinComment,
+    appendPinFeedback,
     deletePin,
     dragRect,
     syncPinLayerHeight,
