@@ -33,9 +33,10 @@ function ThreadEntryRow({ entry }: { entry: FeedbackThreadEntry }) {
       <div className="exp-lab-thread-entry__main">
         <div className="exp-lab-thread-entry__meta">
           <strong>{entry.author_name ?? 'Guest'}</strong>
-          {entry.author_github_id ? (
-            <span className="exp-lab-thread-entry__handle"> · @{entry.author_github_id}</span>
-          ) : null}
+          <span className="exp-lab-thread-entry__sep" aria-hidden>
+            {' '}
+            ·{' '}
+          </span>
           <time className="exp-lab-thread-entry__time" dateTime={entry.created_at}>
             {new Date(entry.created_at).toLocaleString()}
           </time>
@@ -362,13 +363,8 @@ export function CommentDialog() {
                   </button>
                 </div>
 
-                <p className="exp-lab-detail-meta" style={{ marginTop: 0 }}>
-                  Pin placed {new Date(detail.created_at).toLocaleString()}
-                </p>
-
                 <div className="exp-lab-field exp-lab-field--tight">
-                  <span className="exp-lab-field-label">Feedback thread</span>
-                  <div className="exp-lab-thread-list" role="list">
+                  <div className="exp-lab-thread-list" role="list" aria-label="Feedback messages">
                     {threadEntries.length === 0 ? (
                       <p className="exp-lab-muted-inline" style={{ margin: '8px 0' }}>
                         No messages yet. Add feedback below.
@@ -436,7 +432,7 @@ export function CommentDialog() {
                     id="exp-lab-comment-append"
                     value={appendText}
                     onChange={(e) => setAppendText(e.target.value)}
-                    placeholder="Write a message for this thread…"
+                    placeholder="Add response..."
                   />
                 </div>
 

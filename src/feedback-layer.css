@@ -223,14 +223,6 @@
   margin-bottom: 10px;
 }
 
-.exp-lab-field-label {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--exp-lab-muted);
-  margin-bottom: 6px;
-}
-
 .exp-lab-feedback-body-row {
   display: flex;
   align-items: flex-start;
@@ -268,12 +260,6 @@
   padding: 10px 12px;
   font: inherit;
   resize: vertical;
-}
-
-.exp-lab-detail-meta {
-  font-size: 12px;
-  color: var(--exp-lab-muted);
-  margin: 8px 0 0;
 }
 
 .exp-lab-actions-detail {
@@ -343,19 +329,19 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 6px 10px;
+  gap: 0;
 }
 
-.exp-lab-thread-entry__handle {
+.exp-lab-thread-entry__sep {
   color: var(--exp-lab-muted);
   font-weight: 400;
+  white-space: pre;
 }
 
 .exp-lab-thread-entry__time {
   font-size: 12px;
   font-weight: 400;
   color: var(--exp-lab-muted);
-  margin-left: auto;
 }
 
 .exp-lab-thread-entry__text {
