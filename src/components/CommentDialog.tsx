@@ -1,11 +1,12 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Github, X } from 'lucide-react';
+import { Github, MoreVertical, X } from 'lucide-react';
 import type { MouseEvent } from 'react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useExpLab } from '../context/ExpLabContext';
-import { getPinThreadEntries } from '../lib/pinThread';
-import type { FeedbackThreadEntry } from '../types';
+import { getStoredGuestName } from '../lib/storage';
+import { canUserEditThreadEntry, getPinThreadEntries } from '../lib/pinThread';
+import type { AuthorInfo, FeedbackThreadEntry } from '../types';
 
 function initials(name: string | null): string {
   if (!name?.trim()) {
@@ -18,7 +19,85 @@ function initials(name: string | null): string {
   return name.slice(0, 2).toUpperCase();
 }
 
-function ThreadEntryRow({ entry }: { entry: FeedbackThreadEntry }) {
+function ThreadEntryOverflowMenu({ onEdit }: { onEdit: () => void }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onDoc = (e: Event) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  return (
+    <div className="exp-lab-entry-overflow" ref={wrapRef}>
+      <button
+        type="button"
+        className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--icon exp-lab-entry-overflow__trigger"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label="Message actions"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <MoreVertical size={18} aria-hidden />
+      </button>
+      {open ? (
+        <div className="exp-lab-entry-overflow__panel" role="menu">
+          <button
+            type="button"
+            className="exp-lab-entry-overflow__item"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onEdit();
+            }}
+          >
+            Edit
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type ThreadEntryRowProps = {
+  entry: FeedbackThreadEntry;
+  authorDisplay: AuthorInfo | null;
+  guestIdentity: string | null;
+  isEditing: boolean;
+  editDraft: string;
+  editError: string | null;
+  savingEdit: boolean;
+  editTextareaRef: RefObject<HTMLTextAreaElement | null>;
+  onStartEdit: () => void;
+  onEditDraftChange: (value: string) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: () => void;
+};
+
+function ThreadEntryRow({
+  entry,
+  authorDisplay,
+  guestIdentity,
+  isEditing,
+  editDraft,
+  editError,
+  savingEdit,
+  editTextareaRef,
+  onStartEdit,
+  onEditDraftChange,
+  onCancelEdit,
+  onSaveEdit,
+}: ThreadEntryRowProps) {
+  const canEdit = canUserEditThreadEntry(entry, authorDisplay, guestIdentity);
+
   return (
     <div className="exp-lab-thread-entry">
       <div className="exp-lab-thread-entry__avatar">
@@ -32,16 +111,56 @@ function ThreadEntryRow({ entry }: { entry: FeedbackThreadEntry }) {
       </div>
       <div className="exp-lab-thread-entry__main">
         <div className="exp-lab-thread-entry__meta">
-          <strong>{entry.author_name ?? 'Guest'}</strong>
-          <span className="exp-lab-thread-entry__sep" aria-hidden>
-            {' '}
-            ·{' '}
-          </span>
-          <time className="exp-lab-thread-entry__time" dateTime={entry.created_at}>
-            {new Date(entry.created_at).toLocaleString()}
-          </time>
+          <div className="exp-lab-thread-entry__meta-start">
+            <strong>{entry.author_name ?? 'Guest'}</strong>
+            <span className="exp-lab-thread-entry__sep" aria-hidden>
+              {' '}
+              ·{' '}
+            </span>
+            <time className="exp-lab-thread-entry__time" dateTime={entry.created_at}>
+              {new Date(entry.created_at).toLocaleString()}
+            </time>
+          </div>
+          {canEdit && !isEditing ? <ThreadEntryOverflowMenu onEdit={onStartEdit} /> : null}
         </div>
-        <div className="exp-lab-thread-entry__text">{entry.body}</div>
+        {isEditing ? (
+          <div className="exp-lab-thread-entry__edit">
+            <textarea
+              ref={editTextareaRef}
+              className="exp-lab-thread-entry__edit-textarea"
+              value={editDraft}
+              onChange={(e) => onEditDraftChange(e.target.value)}
+              rows={4}
+              aria-label="Edit message"
+              disabled={savingEdit}
+            />
+            <div className="exp-lab-thread-entry__edit-actions">
+              <button
+                type="button"
+                className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--sm"
+                onClick={onCancelEdit}
+                disabled={savingEdit}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="exp-lab-btn exp-lab-btn--primary exp-lab-btn--sm"
+                onClick={() => void onSaveEdit()}
+                disabled={savingEdit || !editDraft.trim()}
+              >
+                {savingEdit ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+            {editError ? (
+              <p className="exp-lab-thread-entry__edit-error" role="alert">
+                {editError}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <div className="exp-lab-thread-entry__text">{entry.body}</div>
+        )}
       </div>
     </div>
   );
@@ -62,6 +181,7 @@ export function CommentDialog() {
     leaveFeedbackMode,
     deletePin,
     appendPinFeedback,
+    updatePinThreadEntry,
   } = useExpLab();
 
   const [text, setText] = useState('');
@@ -76,8 +196,14 @@ export function CommentDialog() {
   const [savingAppend, setSavingAppend] = useState(false);
   const [appendError, setAppendError] = useState<string | null>(null);
 
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
   const pendingCommentRef = useRef<HTMLTextAreaElement>(null);
   const appendTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -96,10 +222,16 @@ export function CommentDialog() {
   useEffect(() => {
     if (!selectedPin) {
       setAppendText('');
+      setEditingEntryId(null);
+      setEditDraft('');
+      setEditError(null);
       return;
     }
     setAppendText('');
     setAppendError(null);
+    setEditingEntryId(null);
+    setEditDraft('');
+    setEditError(null);
   }, [selectedPin?.id]);
 
   useEffect(() => {
@@ -119,15 +251,29 @@ export function CommentDialog() {
   }, [pendingPin]);
 
   useLayoutEffect(() => {
-    if (!selectedPin) {
+    if (!selectedPin || editingEntryId) {
       return;
     }
     appendTextareaRef.current?.focus();
-  }, [selectedPin?.id]);
+  }, [selectedPin?.id, editingEntryId]);
+
+  useLayoutEffect(() => {
+    if (!editingEntryId) {
+      return;
+    }
+    editTextareaRef.current?.focus();
+  }, [editingEntryId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || !open) {
+        return;
+      }
+      if (editingEntryId && selectedPin) {
+        setEditingEntryId(null);
+        setEditDraft('');
+        setEditError(null);
+        e.preventDefault();
         return;
       }
       if (pendingPin) {
@@ -138,10 +284,11 @@ export function CommentDialog() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, pendingPin, selectedPin, leaveFeedbackMode, closePinDetail]);
+  }, [open, pendingPin, selectedPin, editingEntryId, leaveFeedbackMode, closePinDetail]);
 
   const detail = selectedPin;
   const threadEntries = detail ? getPinThreadEntries(detail) : [];
+  const guestIdentity = (guestName ?? getStoredGuestName() ?? '').trim() || null;
 
   const onDeleteDetail = async () => {
     if (!detail) {
@@ -185,6 +332,23 @@ export function CommentDialog() {
       setAppendError(e instanceof Error ? e.message : 'Could not post feedback.');
     } finally {
       setSavingAppend(false);
+    }
+  };
+
+  const onSaveThreadEdit = async () => {
+    if (!detail || !editingEntryId) {
+      return;
+    }
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      await updatePinThreadEntry(detail.id, editingEntryId, editDraft);
+      setEditingEntryId(null);
+      setEditDraft('');
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : 'Could not save edit.');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -240,7 +404,7 @@ export function CommentDialog() {
             if (pendingPin && saving) {
               return;
             }
-            if (selectedPin && (savingAppend || deleting)) {
+            if (selectedPin && (savingAppend || deleting || savingEdit)) {
               return;
             }
             dialogClose();
@@ -350,17 +514,52 @@ export function CommentDialog() {
 
             {detail ? (
               <>
-                <div className="exp-lab-dialog-header-row exp-lab-dialog-header-row--tight">
-                  <h2 id="exp-lab-dialog-title">Feedback</h2>
-                  <button
-                    type="button"
-                    className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--icon exp-lab-dialog-close"
-                    aria-label="Close"
-                    onClick={closePinDetail}
-                    disabled={deleting || savingAppend}
-                  >
-                    <X size={20} aria-hidden />
-                  </button>
+                <div className="exp-lab-dialog-header-stack">
+                  <div className="exp-lab-dialog-header-row exp-lab-dialog-header-row--tight">
+                    <h2 id="exp-lab-dialog-title">Feedback</h2>
+                    <button
+                      type="button"
+                      className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--icon exp-lab-dialog-close"
+                      aria-label="Close"
+                      onClick={closePinDetail}
+                      disabled={deleting || savingAppend || savingEdit}
+                    >
+                      <X size={20} aria-hidden />
+                    </button>
+                  </div>
+
+                  {persistenceMode === 'supabase' ? (
+                    <div className="exp-lab-author-row exp-lab-author-row--under-title">
+                      {authorDisplay ? (
+                        <>
+                          {authorDisplay.avatarUrl ? (
+                            <img
+                              src={authorDisplay.avatarUrl}
+                              alt=""
+                              width={28}
+                              height={28}
+                              style={{ borderRadius: '50%' }}
+                            />
+                          ) : null}
+                          <span>
+                            Adding as <strong>{authorDisplay.name}</strong>
+                          </span>
+                          <button type="button" className="exp-lab-btn exp-lab-btn--link" onClick={() => void signOut()}>
+                            Sign out
+                          </button>
+                        </>
+                      ) : (
+                        <button type="button" className="exp-lab-btn exp-lab-btn--ghost" onClick={() => void signInWithGitHub()}>
+                          <Github size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} aria-hidden />
+                          Sign in with GitHub
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="exp-lab-under-title-note">
+                      Local-only mode — thread is stored in this browser.
+                    </p>
+                  )}
                 </div>
 
                 <div className="exp-lab-field exp-lab-field--tight">
@@ -372,45 +571,33 @@ export function CommentDialog() {
                     ) : (
                       threadEntries.map((entry) => (
                         <div key={entry.id} role="listitem">
-                          <ThreadEntryRow entry={entry} />
+                          <ThreadEntryRow
+                            entry={entry}
+                            authorDisplay={authorDisplay}
+                            guestIdentity={guestIdentity}
+                            isEditing={editingEntryId === entry.id}
+                            editDraft={editingEntryId === entry.id ? editDraft : ''}
+                            editError={editingEntryId === entry.id ? editError : null}
+                            savingEdit={editingEntryId === entry.id ? savingEdit : false}
+                            editTextareaRef={editTextareaRef}
+                            onStartEdit={() => {
+                              setEditingEntryId(entry.id);
+                              setEditDraft(entry.body);
+                              setEditError(null);
+                            }}
+                            onEditDraftChange={setEditDraft}
+                            onCancelEdit={() => {
+                              setEditingEntryId(null);
+                              setEditDraft('');
+                              setEditError(null);
+                            }}
+                            onSaveEdit={onSaveThreadEdit}
+                          />
                         </div>
                       ))
                     )}
                   </div>
                 </div>
-
-                {persistenceMode === 'supabase' ? (
-                  <div className="exp-lab-author-row">
-                    {authorDisplay ? (
-                      <>
-                        {authorDisplay.avatarUrl ? (
-                          <img
-                            src={authorDisplay.avatarUrl}
-                            alt=""
-                            width={28}
-                            height={28}
-                            style={{ borderRadius: '50%' }}
-                          />
-                        ) : null}
-                        <span>
-                          Adding as <strong>{authorDisplay.name}</strong>
-                        </span>
-                        <button type="button" className="exp-lab-btn exp-lab-btn--link" onClick={() => void signOut()}>
-                          Sign out
-                        </button>
-                      </>
-                    ) : (
-                      <button type="button" className="exp-lab-btn exp-lab-btn--ghost" onClick={() => void signInWithGitHub()}>
-                        <Github size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} aria-hidden />
-                        Sign in with GitHub
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <p style={{ fontSize: 13, color: 'var(--exp-lab-muted)', marginBottom: 12 }}>
-                    Local-only mode — thread is stored in this browser.
-                  </p>
-                )}
 
                 {!authorDisplay ? (
                   <div className="exp-lab-field">
@@ -425,14 +612,15 @@ export function CommentDialog() {
                   </div>
                 ) : null}
 
-                <div className="exp-lab-field">
-                  <label htmlFor="exp-lab-comment-append">Add feedback</label>
+                <div className="exp-lab-field exp-lab-field--tight">
                   <textarea
                     ref={appendTextareaRef}
                     id="exp-lab-comment-append"
                     value={appendText}
                     onChange={(e) => setAppendText(e.target.value)}
                     placeholder="Add response..."
+                    aria-label="Add response"
+                    rows={4}
                   />
                 </div>
 
@@ -452,7 +640,7 @@ export function CommentDialog() {
                     type="button"
                     className="exp-lab-btn exp-lab-btn--danger"
                     onClick={() => void onDeleteDetail()}
-                    disabled={deleting || savingAppend}
+                    disabled={deleting || savingAppend || savingEdit}
                   >
                     {deleting ? 'Deleting…' : 'Delete pin'}
                   </button>
@@ -460,7 +648,7 @@ export function CommentDialog() {
                     type="button"
                     className="exp-lab-btn exp-lab-btn--primary"
                     onClick={() => void onPostAppend()}
-                    disabled={!appendText.trim() || savingAppend || deleting}
+                    disabled={!appendText.trim() || savingAppend || deleting || savingEdit}
                   >
                     {savingAppend ? 'Posting…' : 'Post feedback'}
                   </button>

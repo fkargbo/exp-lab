@@ -1,4 +1,4 @@
-import type { FeedbackPinRecord, FeedbackThreadEntry } from '../types';
+import type { AuthorInfo, FeedbackPinRecord, FeedbackThreadEntry } from '../types';
 
 function isThreadEntry(x: unknown): x is FeedbackThreadEntry {
   if (!x || typeof x !== 'object') {
@@ -52,6 +52,28 @@ export type PinEntryAuthor = {
   avatarUrl: string | null;
   githubId: string | null;
 };
+
+/**
+ * Whether the current viewer may edit a thread message (GitHub id match, or guest name match).
+ * For guests, `guestIdentity` should be the persisted guest name (not an unsaved text field).
+ */
+export function canUserEditThreadEntry(
+  entry: FeedbackThreadEntry,
+  authorDisplay: AuthorInfo | null,
+  guestIdentity: string | null,
+): boolean {
+  const entryGh = entry.author_github_id?.trim();
+  const userGh = authorDisplay?.githubId?.trim();
+  if (entryGh) {
+    return Boolean(userGh && userGh.toLowerCase() === entryGh.toLowerCase());
+  }
+  if (userGh) {
+    return false;
+  }
+  const g = (guestIdentity ?? '').trim();
+  const en = (entry.author_name ?? '').trim();
+  return Boolean(g && en && g.toLowerCase() === en.toLowerCase());
+}
 
 export function createThreadEntry(body: string, author: PinEntryAuthor): FeedbackThreadEntry {
   const trimmed = body.trim();

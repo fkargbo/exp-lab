@@ -17,8 +17,14 @@ import {
   getLocalFeedbackStorageKey,
   loadLocalPins,
   removeLocalPin,
+  updateLocalPinEntry,
 } from '../lib/localFeedbackStore';
-import { createThreadEntry, getPinThreadEntries, threadBodiesJoined } from '../lib/pinThread';
+import {
+  canUserEditThreadEntry,
+  createThreadEntry,
+  getPinThreadEntries,
+  threadBodiesJoined,
+} from '../lib/pinThread';
 import { getStoredGuestName, setStoredGuestName } from '../lib/storage';
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 
@@ -64,6 +70,8 @@ type ExpLabContextValue = {
   closePinDetail: () => void;
   /** Append a new thread message on an existing pin (Supabase or local storage). */
   appendPinFeedback: (pinId: string, text: string) => Promise<void>;
+  /** Update an existing thread message (author-only; Supabase or local storage). */
+  updatePinThreadEntry: (pinId: string, entryId: string, newBody: string) => Promise<void>;
   /** Remove a saved pin (Supabase or local storage). Closes detail view on success. */
   deletePin: (pinId: string) => Promise<void>;
   dragRect: DragRect | null;
@@ -496,6 +504,72 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     [supabase, projectId, pins, selectedPin, user, guestName, setGuestName, loadPins],
   );
 
+  const updatePinThreadEntry = useCallback(
+    async (pinId: string, entryId: string, newBody: string) => {
+      const trimmed = newBody.trim();
+      if (!trimmed) {
+        throw new Error('Enter a comment.');
+      }
+      const pin =
+        pins.find((p) => p.id === pinId) ?? (selectedPin?.id === pinId ? selectedPin : undefined);
+      if (!pin) {
+        throw new Error('Pin not found.');
+      }
+      const entries = getPinThreadEntries(pin);
+      const entry = entries.find((e) => e.id === entryId);
+      if (!entry) {
+        throw new Error('Message not found.');
+      }
+
+      const guestIdentity = (guestName ?? getStoredGuestName() ?? '').trim() || null;
+      if (!canUserEditThreadEntry(entry, authorFromUser(user), guestIdentity)) {
+        throw new Error('You can only edit your own messages.');
+      }
+
+      const merged = entries.map((e) => (e.id === entryId ? { ...e, body: trimmed } : e));
+      const joined = threadBodiesJoined(merged);
+      const last = merged[merged.length - 1]!;
+
+      if (!supabase) {
+        updateLocalPinEntry(projectId, pinId, entryId, trimmed);
+        const fresh = loadLocalPins(projectId).find((p) => p.id === pinId);
+        if (fresh) {
+          setSelectedPin(fresh);
+        }
+        setPins(loadLocalPins(projectId));
+        return;
+      }
+
+      const { error } = await supabase
+        .from('feedback_pins')
+        .update({
+          comment_entries: merged,
+          comment_text: joined,
+          author_name: last.author_name,
+          author_avatar_url: last.author_avatar_url,
+          author_github_id: last.author_github_id,
+        })
+        .eq('id', pinId);
+      if (error) {
+        throw new Error(error.message);
+      }
+      setSelectedPin((prev) =>
+        prev && prev.id === pinId
+          ? {
+              ...prev,
+              comment_entries: merged,
+              comment_text: joined,
+              author_name: last.author_name,
+              author_avatar_url: last.author_avatar_url,
+              author_github_id: last.author_github_id,
+            }
+          : prev,
+      );
+      void loadPins();
+    },
+    [supabase, projectId, pins, selectedPin, user, guestName, loadPins],
+  );
+
   const submitComment = useCallback(
     async (text: string) => {
       if (!pendingPin) {
@@ -596,6 +670,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     openPinDetail,
     closePinDetail,
     appendPinFeedback,
+    updatePinThreadEntry,
     deletePin,
     dragRect,
     syncPinLayerHeight,

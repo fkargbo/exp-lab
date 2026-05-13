@@ -72,13 +72,41 @@ export function appendLocalPinEntry(
     }
     const prev = getPinThreadEntries(p);
     const next = [...prev, entry];
+    const last = next[next.length - 1];
     return {
       ...p,
       comment_entries: next,
       comment_text: threadBodiesJoined(next),
-      author_name: entry.author_name,
-      author_avatar_url: entry.author_avatar_url,
-      author_github_id: entry.author_github_id,
+      author_name: last?.author_name ?? p.author_name,
+      author_avatar_url: last?.author_avatar_url ?? p.author_avatar_url,
+      author_github_id: last?.author_github_id ?? p.author_github_id,
+    };
+  });
+  saveLocalPins(projectId, list);
+}
+
+/** Update one thread message body; keeps pin-level author fields aligned with latest entry. */
+export function updateLocalPinEntry(
+  projectId: string,
+  pinId: string,
+  entryId: string,
+  newBody: string,
+): void {
+  const body = newBody.trim();
+  const list = loadLocalPins(projectId).map((p) => {
+    if (p.id !== pinId) {
+      return p;
+    }
+    const prev = getPinThreadEntries(p);
+    const next = prev.map((e) => (e.id === entryId ? { ...e, body } : e));
+    const last = next[next.length - 1];
+    return {
+      ...p,
+      comment_entries: next,
+      comment_text: threadBodiesJoined(next),
+      author_name: last?.author_name ?? p.author_name,
+      author_avatar_url: last?.author_avatar_url ?? p.author_avatar_url,
+      author_github_id: last?.author_github_id ?? p.author_github_id,
     };
   });
   saveLocalPins(projectId, list);
