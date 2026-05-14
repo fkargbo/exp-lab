@@ -394,15 +394,22 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
 
   const authorDisplay = useMemo(() => authorFromUser(user), [user]);
 
+  /** Post-OAuth return URL (no `#…` fragment) — must be listed in Supabase Auth → URL Configuration → Redirect URLs. */
+  const getOAuthRedirectUrl = useCallback(() => {
+    if (typeof window === 'undefined') return '';
+    const { origin, pathname, search } = window.location;
+    return `${origin}${pathname}${search}`;
+  }, []);
+
   const signInWithGitHub = useCallback(async () => {
     if (!supabase) {
       return;
     }
     await supabase.auth.signInWithOAuth({
       provider: 'github',
-      options: { redirectTo: window.location.href },
+      options: { redirectTo: getOAuthRedirectUrl() },
     });
-  }, [supabase]);
+  }, [supabase, getOAuthRedirectUrl]);
 
   const signOut = useCallback(async () => {
     if (!supabase) {

@@ -60,6 +60,21 @@ Without Supabase env vars, feedback is still **saved locally** in the browser (`
 ### Identity
 
 - **GitHub**: Configure **GitHub** as an OAuth provider in Supabase Auth. Reviewers use **Sign in with GitHub** in the comment dialog; avatar and name come from `user_metadata`.
+
+#### GitHub Pages: avoid redirect to `localhost`
+
+Supabase only redirects the browser back to URLs you allow. The client passes `redirectTo` as the **current origin + path + query** (no hash). If that URL is **not** in your project’s allow list, Supabase falls back to **Site URL** — often `http://localhost:3000` during setup — which is why OAuth can “work” but land on localhost after signing in on `https://…github.io/…`.
+
+In the Supabase dashboard: **Authentication → URL Configuration**
+
+1. **Redirect URLs** — add your live prototype (wildcard is fine), for example:
+   - `https://fkargbo.github.io/ux-prototypes/**`
+2. Keep **local dev** working too, for example:
+   - `http://localhost:3000/**`
+3. Optionally set **Site URL** to your primary public URL (e.g. `https://fkargbo.github.io/ux-prototypes/`) so any fallback still lands on Pages, not localhost.
+
+Save, wait a minute, then try **Sign in with GitHub** again from the hosted page.
+
 - **Guest**: If not signed in, the first comment asks for a **display name** (stored in `localStorage`).
 
 ### `project_id`
