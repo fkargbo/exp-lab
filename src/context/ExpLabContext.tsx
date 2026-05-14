@@ -27,6 +27,7 @@ import {
 } from '../lib/pinThread';
 import { getStoredGuestName, setStoredGuestName } from '../lib/storage';
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
+import { getOAuthRedirectUrl } from '../lib/oauthRedirect';
 
 const DRAG_THRESHOLD_PX = 6;
 
@@ -394,13 +395,6 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
 
   const authorDisplay = useMemo(() => authorFromUser(user), [user]);
 
-  /** Post-OAuth return URL (no `#…` fragment) — must be listed in Supabase Auth → URL Configuration → Redirect URLs. */
-  const getOAuthRedirectUrl = useCallback(() => {
-    if (typeof window === 'undefined') return '';
-    const { origin, pathname, search } = window.location;
-    return `${origin}${pathname}${search}`;
-  }, []);
-
   const signInWithGitHub = useCallback(async () => {
     if (!supabase) {
       return;
@@ -409,7 +403,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       provider: 'github',
       options: { redirectTo: getOAuthRedirectUrl() },
     });
-  }, [supabase, getOAuthRedirectUrl]);
+  }, [supabase]);
 
   const signOut = useCallback(async () => {
     if (!supabase) {

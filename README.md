@@ -63,17 +63,19 @@ Without Supabase env vars, feedback is still **saved locally** in the browser (`
 
 #### GitHub Pages: avoid redirect to `localhost`
 
-Supabase only redirects the browser back to URLs you allow. The client passes `redirectTo` as the **current origin + path + query** (no hash). If that URL is **not** in your project’s allow list, Supabase falls back to **Site URL** — often `http://localhost:3000` during setup — which is why OAuth can “work” but land on localhost after signing in on `https://…github.io/…`.
+Supabase only redirects the browser back to URLs you allow. The ExP-Lab bundle sends `redirectTo` as **`VITE_OAUTH_REDIRECT_ORIGIN` + current `pathname` + `search`** when that env var is set at build (GitHub Actions sets it to `https://<your-github-username>.github.io` by default). Otherwise it uses `window.location.origin` + path. If that final URL is **not** allow-listed, Supabase falls back to **Site URL** — often still `http://localhost:3000` — so you land on localhost with tokens in the hash.
 
-In the Supabase dashboard: **Authentication → URL Configuration**
+Do all of the following in the Supabase dashboard (**Authentication → URL Configuration**):
 
-1. **Redirect URLs** — add your live prototype (wildcard is fine), for example:
+1. **Redirect URLs** — add (at least) one line that matches your hosted app, for example:
    - `https://fkargbo.github.io/ux-prototypes/**`
-2. Keep **local dev** working too, for example:
+2. **Site URL** — set to your real public entry, for example:
+   - `https://fkargbo.github.io/ux-prototypes/`
+   so even fallbacks are not `localhost`.
+3. Keep local dev working, for example:
    - `http://localhost:3000/**`
-3. Optionally set **Site URL** to your primary public URL (e.g. `https://fkargbo.github.io/ux-prototypes/`) so any fallback still lands on Pages, not localhost.
 
-Save, wait a minute, then try **Sign in with GitHub** again from the hosted page.
+Save, wait a minute, redeploy **`feedback-layer.js`** (parent repo Pages build runs `exp-lab` with the env vars above), hard-refresh the prototype, then try **Sign in with GitHub** again.
 
 - **Guest**: If not signed in, the first comment asks for a **display name** (stored in `localStorage`).
 
