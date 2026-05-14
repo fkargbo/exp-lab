@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - main
+      - 2026-05-12-pm5r
   workflow_dispatch:
 
 permissions:
