@@ -96,7 +96,7 @@ The **Observability Agentic Troubleshooting AI** prototype loads ExP-Lab automat
 | Environment | Script URL |
 |-------------|------------|
 | **Local dev** (`npm start`) | `http://localhost:<port>/feedback-layer.js` |
-| **GitHub Pages** | `https://<host>/HPUX-Prototypes/feedback-layer.js` |
+| **GitHub Pages** | `https://<user>.github.io/<repo>/feedback-layer.js` (repo name is the path segment) |
 
 **Dev server:** after `cd exp-lab && npm run build`, webpack serves **`exp-lab/dist/feedback-layer.js`** automatically (see `webpack.dev.js` — no need to copy into root `dist/` unless you prefer). Restart **`npm start`** if the dev server was already running before you built ExP-Lab.
 
@@ -109,6 +109,8 @@ cp exp-lab/dist/feedback-layer.js dist/feedback-layer.js
 Then start the main app (`npm start` from the repo root). Open the **Observability Agentic Troubleshooting** prototype from the launcher, press **C** to toggle feedback mode.
 
 Put **`VITE_SUPABASE_URL`** and **`VITE_SUPABASE_ANON_KEY`** in `exp-lab/.env` before `npm run build` so the copied bundle can save comments.
+
+**Parent repo (e.g. `ux-prototypes`) on GitHub Actions:** set the same two values as **repository secrets** or as secrets on the **`github-pages` environment** (the deploy workflow’s `build` job uses that environment so the Vite build sees them). If they are missing at build time, the shipped `feedback-layer.js` stays in browser-only mode.
 
 For production deploys, ensure **`feedback-layer.js`** is deployed alongside `index.html` (same folder as the main bundles), e.g. add `cp exp-lab/dist/feedback-layer.js dist/` to your publish step before `gh-pages`.
 

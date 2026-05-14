@@ -469,8 +469,21 @@ export function CommentDialog() {
                   </div>
                 ) : (
                   <p style={{ fontSize: 13, color: 'var(--exp-lab-muted)', marginBottom: 12 }}>
-                    Feedback is saved only in this browser (no server). Add Supabase env vars in{' '}
-                    <code style={{ fontSize: 12 }}>exp-lab</code> if you want sync, GitHub sign-in, and email alerts.
+                    {typeof window !== 'undefined' && window.location.hostname.endsWith('.github.io') ? (
+                      <>
+                        Feedback is saved only in this browser (no server). For sync and GitHub sign-in on this site,
+                        the repo maintainer must set Actions secrets <code style={{ fontSize: 12 }}>VITE_SUPABASE_URL</code>{' '}
+                        and <code style={{ fontSize: 12 }}>VITE_SUPABASE_ANON_KEY</code> (see{' '}
+                        <code style={{ fontSize: 12 }}>.github/workflows/deploy.yml</code> in the hosting repo) and redeploy.
+                        For local dev, use <code style={{ fontSize: 12 }}>exp-lab/.env</code> and rebuild.
+                      </>
+                    ) : (
+                      <>
+                        Feedback is saved only in this browser (no server). Add Supabase env vars in{' '}
+                        <code style={{ fontSize: 12 }}>exp-lab/.env</code> and rebuild if you want sync, GitHub sign-in,
+                        and email alerts.
+                      </>
+                    )}
                   </p>
                 )}
 
