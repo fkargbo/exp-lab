@@ -7,9 +7,10 @@ import React, {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import type { AuthorInfo, FeedbackPinKind, FeedbackPinRecord } from '../types';
-import { getCanonicalPrototypeUrl, getProjectId } from '../lib/projectId';
+import { getCanonicalPrototypeUrl, getProjectId, subscribeToLocationScope } from '../lib/projectId';
 import {
   appendLocalPin,
   appendLocalPinEntry,
@@ -122,8 +123,13 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
   }>({ active: false, startX: 0, startY: 0, pointerId: null });
   const [dragRect, setDragRect] = useState<DragRect | null>(null);
 
-  const projectId = useMemo(() => getProjectId(), []);
+  const projectId = useSyncExternalStore(subscribeToLocationScope, getProjectId, getProjectId);
   const supabase = getSupabase();
+
+  useEffect(() => {
+    setPendingPin(null);
+    setSelectedPin(null);
+  }, [projectId]);
   const supabaseReady = isSupabaseConfigured() && supabase !== null;
   const persistenceMode: 'supabase' | 'local' = supabase ? 'supabase' : 'local';
 

@@ -81,7 +81,11 @@ Save, wait a minute, redeploy **`feedback-layer.js`** (parent repo Pages build r
 
 ### `project_id`
 
-Computed as `location.hostname + location.pathname` (query/hash ignored) so each prototype route is scoped automatically.
+Computed from the current browser location: **hostname + pathname + search + hash** (pathname trailing slash normalized). Pins are scoped to that string so **each prototype page** (including SPA route changes and hash routes) has its own thread of feedback.
+
+The layer **re-subscribes** when the URL changes (`popstate`, `hashchange`, and `history.pushState` / `replaceState`) so client-side navigation loads the correct pins without a full reload.
+
+**Note:** Changing this format re-scopes storage keys and Supabase rows; older pins stored under the previous `project_id` shape will not appear until migrated.
 
 ### GitHub Pages SPA routing
 
