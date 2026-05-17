@@ -10,7 +10,12 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import type { AuthorInfo, FeedbackPinKind, FeedbackPinRecord } from '../types';
-import { getCanonicalPrototypeUrl, getProjectId, subscribeToLocationScope } from '../lib/projectId';
+import {
+  getCanonicalPrototypeUrl,
+  getProjectId,
+  realtimeEqFilter,
+  subscribeToLocationScope,
+} from '../lib/projectId';
 import {
   appendLocalPin,
   appendLocalPinEntry,
@@ -124,12 +129,12 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
   const [dragRect, setDragRect] = useState<DragRect | null>(null);
 
   const projectId = useSyncExternalStore(subscribeToLocationScope, getProjectId, getProjectId);
+  /** Latest scope for async pin loads (avoids a slow fetch for page A finishing after navigate to B). */
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+
   const supabase = getSupabase();
 
-  useEffect(() => {
-    setPendingPin(null);
-    setSelectedPin(null);
-  }, [projectId]);
   const supabaseReady = isSupabaseConfigured() && supabase !== null;
   const persistenceMode: 'supabase' | 'local' = supabase ? 'supabase' : 'local';
 
@@ -170,16 +175,25 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
   }, [supabase]);
 
   const loadPins = useCallback(async () => {
+    const scope = projectIdRef.current;
+
     if (!supabase) {
-      setPins(loadLocalPins(projectId));
+      setPins(loadLocalPins(scope));
+      setLoadingPins(false);
       return;
     }
+
     setLoadingPins(true);
     const { data, error } = await supabase
       .from('feedback_pins')
       .select('*')
-      .eq('project_id', projectId)
+      .eq('project_id', scope)
       .order('created_at', { ascending: true });
+
+    if (projectIdRef.current !== scope) {
+      return;
+    }
+
     setLoadingPins(false);
     if (error) {
       console.warn('[ExP-Lab] load pins', error.message);
@@ -187,25 +201,32 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     setPins((data ?? []) as FeedbackPinRecord[]);
-  }, [supabase, projectId]);
+  }, [supabase]);
 
   useEffect(() => {
+    setPins([]);
+    setLoadingPins(true);
+    setPendingPin(null);
+    setSelectedPin(null);
+    setDragRect(null);
+    dragRef.current = { active: false, startX: 0, startY: 0, pointerId: null };
     void loadPins();
-  }, [loadPins]);
+  }, [projectId, loadPins]);
 
   useEffect(() => {
     if (!supabase) {
       return;
     }
+    const scope = projectIdRef.current;
     const channel = supabase
-      .channel(`exp-lab-pins:${projectId}`)
+      .channel(`exp-lab-pins:${encodeURIComponent(scope)}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'feedback_pins',
-          filter: `project_id=eq.${projectId}`,
+          filter: realtimeEqFilter('project_id', scope),
         },
         () => {
           void loadPins();
@@ -605,7 +626,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       });
 
       const base = {
-        project_id: projectId,
+        project_id: projectIdRef.current,
         prototype_url: getCanonicalPrototypeUrl(),
         comment_text: entry.body,
         comment_entries: [entry],
@@ -641,7 +662,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
         };
         appendLocalPin(record);
         setPendingPin(null);
-        setPins(loadLocalPins(projectId));
+        setPins(loadLocalPins(projectIdRef.current));
         return;
       }
 

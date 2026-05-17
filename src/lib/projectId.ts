@@ -45,3 +45,12 @@ export function subscribeToLocationScope(callback: () => void): () => void {
 export function getCanonicalPrototypeUrl(): string {
   return `${window.location.origin}${window.location.pathname}${window.location.search}`;
 }
+
+/**
+ * PostgREST / Realtime `eq` filter value for columns that may contain `&`, `?`, `=`, etc.
+ * (e.g. `project_id` includes query string + hash).
+ */
+export function realtimeEqFilter(column: string, value: string): string {
+  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `${column}=eq."${escaped}"`;
+}
