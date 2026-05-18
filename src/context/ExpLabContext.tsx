@@ -13,9 +13,9 @@ import type { AuthorInfo, FeedbackPinKind, FeedbackPinRecord } from '../types';
 import {
   getCanonicalPrototypeUrl,
   getProjectId,
-  realtimeEqFilter,
   subscribeToLocationScope,
 } from '../lib/projectId';
+import { pinActivitySnapshot } from '../lib/pinSync';
 import {
   appendLocalPin,
   appendLocalPinEntry,
@@ -36,6 +36,7 @@ import {
   formatUnreadFeedbackSummary,
   getDismissedAlertPinIds,
   saveDismissedAlertPinIds,
+  type UnreadFeedbackSummary,
 } from '../lib/unreadFeedbackSummary';
 import { getReadPinIds, markPinsRead } from '../lib/feedbackReadState';
 import { getStoredGuestName, resolveGuestDisplayName, setStoredGuestName } from '../lib/storage';
@@ -43,6 +44,8 @@ import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 import { getOAuthRedirectUrl } from '../lib/oauthRedirect';
 
 const DRAG_THRESHOLD_PX = 6;
+/** Fallback when Realtime is off or filters miss (common with URL-shaped project_id). */
+const PIN_POLL_INTERVAL_MS = 8_000;
 
 function mergePinIntoList(prev: FeedbackPinRecord[], pin: FeedbackPinRecord): FeedbackPinRecord[] {
   const idx = prev.findIndex((p) => p.id === pin.id);
@@ -112,7 +115,7 @@ type ExpLabContextValue = {
   /** Pins from others on this page not yet opened in feedback mode. */
   unreadCount: number;
   /** Dismissable top-right alert copy when there is unread feedback from others. */
-  unreadAlertSummary: { title: string; subtitle: string } | null;
+  unreadAlertSummary: UnreadFeedbackSummary | null;
   dismissUnreadAlert: () => void;
   /** Open feedback mode and optionally focus a pin (from alert). */
   openFeedbackForPin: (pinId?: string) => void;
@@ -194,8 +197,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     if (feedbackMode || visibleUnreadPins.length === 0) {
       return null;
     }
-    const authors = visibleUnreadPins.map((p) => p.author_name?.trim() || 'Someone');
-    return formatUnreadFeedbackSummary(authors, visibleUnreadPins.length);
+    return formatUnreadFeedbackSummary(visibleUnreadPins);
   }, [feedbackMode, visibleUnreadPins]);
 
   const dismissUnreadAlert = useCallback(() => {
@@ -294,6 +296,32 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     return () => sub.subscription.unsubscribe();
   }, [supabase]);
 
+  const applyPinsFromServer = useCallback(
+    (data: FeedbackPinRecord[]) => {
+      const scope = projectIdRef.current;
+      const scoped = data.filter((p) => p.project_id === scope);
+      const prevSnap = new Map(
+        pinsRef.current
+          .filter((p) => p.project_id === scope)
+          .map((p) => [p.id, pinActivitySnapshot(p)] as const),
+      );
+
+      for (const pin of scoped) {
+        if (isPinAuthoredByCurrentUser(pin, userRef.current, guestNameRef.current)) {
+          continue;
+        }
+        const snap = pinActivitySnapshot(pin);
+        const prev = prevSnap.get(pin.id);
+        if (!prev || prev !== snap) {
+          notifyIncomingPin(pin);
+        }
+      }
+
+      setPins(scoped);
+    },
+    [notifyIncomingPin],
+  );
+
   const loadPins = useCallback(async (options?: { silent?: boolean }) => {
     const scope = projectIdRef.current;
 
@@ -326,8 +354,8 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       }
       return;
     }
-    setPins((data ?? []) as FeedbackPinRecord[]);
-  }, [supabase]);
+    applyPinsFromServer((data ?? []) as FeedbackPinRecord[]);
+  }, [supabase, applyPinsFromServer]);
 
   useEffect(() => {
     setPins([]);
@@ -360,28 +388,58 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
           event: '*',
           schema: 'public',
           table: 'feedback_pins',
-          filter: realtimeEqFilter('project_id', scope),
         },
         (payload) => {
-          if (payload.eventType === 'DELETE' && payload.old) {
-            const removed = payload.old as FeedbackPinRecord;
-            setPins((prev) => prev.filter((p) => p.id !== removed.id));
+          const row = (payload.new ?? payload.old) as FeedbackPinRecord | undefined;
+          if (!row || row.project_id !== scope) {
             return;
           }
-          if (
-            (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') &&
-            payload.new
-          ) {
-            applyRemotePinChange(payload.new as FeedbackPinRecord);
+          if (payload.eventType === 'DELETE') {
+            setPins((prev) => prev.filter((p) => p.id !== row.id));
+            return;
+          }
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            applyRemotePinChange(row);
           }
           void loadPins({ silent: true });
         },
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (err) {
+          console.warn('[ExP-Lab] realtime', err.message);
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('[ExP-Lab] realtime unavailable; using poll fallback');
+        }
+      });
     return () => {
       void supabase.removeChannel(channel);
     };
   }, [supabase, projectId, loadPins, applyRemotePinChange]);
+
+  /* Poll fallback: Realtime often misses rows when project_id is a full URL. */
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+    const poll = () => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      void loadPins({ silent: true });
+    };
+    const intervalId = window.setInterval(poll, PIN_POLL_INTERVAL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void loadPins({ silent: true });
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [supabase, projectId, loadPins]);
 
   /* Other tabs / windows: refresh local pins when storage updates. */
   useEffect(() => {

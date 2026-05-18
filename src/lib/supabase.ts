@@ -9,7 +9,11 @@ export function getSupabase(): SupabaseClient | null {
     return null;
   }
   if (!client) {
-    client = createClient(url, anon);
+    client = createClient(url, anon, {
+      realtime: {
+        params: { eventsPerSecond: 20 },
+      },
+    });
   }
   return client;
 }

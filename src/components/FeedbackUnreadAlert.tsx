@@ -9,10 +9,14 @@ export function FeedbackUnreadAlert() {
     return null;
   }
 
-  const { title, subtitle } = unreadAlertSummary;
+  const { title, subtitle, contributorCount, feedbackCount } = unreadAlertSummary;
 
   return (
-    <div className="exp-lab-notification-stack" aria-live="polite" aria-label="Unread feedback">
+    <div
+      className="exp-lab-notification-stack"
+      aria-live="polite"
+      aria-label={`Unread feedback from ${contributorCount} contributor${contributorCount === 1 ? '' : 's'}, ${feedbackCount} item${feedbackCount === 1 ? '' : 's'}`}
+    >
       <div className="exp-lab-notification-toast" role="alert">
         <button
           type="button"
