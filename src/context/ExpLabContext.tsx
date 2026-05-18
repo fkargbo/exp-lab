@@ -31,6 +31,14 @@ import {
   getPinThreadEntries,
   threadBodiesJoined,
 } from '../lib/pinThread';
+import { isPinAuthoredByCurrentUser } from '../lib/currentAuthor';
+import {
+  createNotificationId,
+  hasShownUnreadBanner,
+  markUnreadBannerShown,
+  type FeedbackNotificationItem,
+} from '../lib/feedbackNotifications';
+import { getReadPinIds, markPinsRead } from '../lib/feedbackReadState';
 import { getStoredGuestName, setStoredGuestName } from '../lib/storage';
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 import { getOAuthRedirectUrl } from '../lib/oauthRedirect';
@@ -90,6 +98,13 @@ type ExpLabContextValue = {
   };
   /** `local` = browser-only storage (zero config). `supabase` = cloud when env vars are set. */
   persistenceMode: 'supabase' | 'local';
+  /** Pins from others on this page not yet opened in feedback mode. */
+  unreadCount: number;
+  /** Transient in-app alerts (new feedback, unread summary). */
+  notifications: FeedbackNotificationItem[];
+  dismissNotification: (id: string) => void;
+  /** Open feedback mode and optionally focus a pin (from toast / FAB). */
+  openFeedbackForPin: (pinId?: string) => void;
 };
 
 const ExpLabContext = createContext<ExpLabContextValue | null>(null);
@@ -119,6 +134,8 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
   const [guestName, setGuestNameState] = useState<string | null>(() => getStoredGuestName());
   const [pendingPin, setPendingPin] = useState<PendingPin | null>(null);
   const [selectedPin, setSelectedPin] = useState<FeedbackPinRecord | null>(null);
+  const [readPinIds, setReadPinIds] = useState<Set<string>>(() => new Set());
+  const [notifications, setNotifications] = useState<FeedbackNotificationItem[]>([]);
 
   const dragRef = useRef<{
     active: boolean;
@@ -132,11 +149,64 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
   /** Latest scope for async pin loads (avoids a slow fetch for page A finishing after navigate to B). */
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
+  const pinsRef = useRef(pins);
+  pinsRef.current = pins;
+  const userRef = useRef(user);
+  userRef.current = user;
+  const guestNameRef = useRef(guestName);
+  guestNameRef.current = guestName;
 
   const supabase = getSupabase();
 
   const supabaseReady = isSupabaseConfigured() && supabase !== null;
   const persistenceMode: 'supabase' | 'local' = supabase ? 'supabase' : 'local';
+
+  const dismissNotification = useCallback((id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  }, []);
+
+  const pushNotification = useCallback((item: Omit<FeedbackNotificationItem, 'id'> & { id?: string }) => {
+    const entry: FeedbackNotificationItem = {
+      id: item.id ?? createNotificationId(),
+      title: item.title,
+      subtitle: item.subtitle,
+      pinId: item.pinId,
+    };
+    setNotifications((prev) => {
+      const withoutDup = item.pinId ? prev.filter((n) => n.pinId !== item.pinId) : prev;
+      return [entry, ...withoutDup].slice(0, 5);
+    });
+  }, []);
+
+  const markAllPinsReadForPage = useCallback(() => {
+    const scope = projectIdRef.current;
+    const ids = pinsRef.current.map((p) => p.id);
+    setReadPinIds(markPinsRead(scope, ids));
+  }, []);
+
+  const unreadCount = useMemo(() => {
+    return pins.filter(
+      (p) => !readPinIds.has(p.id) && !isPinAuthoredByCurrentUser(p, user, guestName),
+    ).length;
+  }, [pins, readPinIds, user, guestName]);
+
+  const notifyIncomingPin = useCallback(
+    (pin: FeedbackPinRecord) => {
+      if (pin.project_id !== projectIdRef.current) {
+        return;
+      }
+      if (isPinAuthoredByCurrentUser(pin, userRef.current, guestNameRef.current)) {
+        return;
+      }
+      const author = pin.author_name?.trim() || 'Someone';
+      pushNotification({
+        title: `${author} left feedback`,
+        subtitle: 'Open feedback to view the pin on this page',
+        pinId: pin.id,
+      });
+    },
+    [pushNotification],
+  );
 
   const syncPinLayerHeight = useCallback(() => {
     const h = Math.max(
@@ -209,9 +279,35 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     setPendingPin(null);
     setSelectedPin(null);
     setDragRect(null);
+    setNotifications([]);
     dragRef.current = { active: false, startX: 0, startY: 0, pointerId: null };
+    setReadPinIds(getReadPinIds(projectId));
     void loadPins();
   }, [projectId, loadPins]);
+
+  useEffect(() => {
+    if (feedbackMode) {
+      markAllPinsReadForPage();
+    }
+  }, [feedbackMode, markAllPinsReadForPage]);
+
+  useEffect(() => {
+    if (loadingPins || feedbackMode || unreadCount === 0) {
+      return;
+    }
+    if (hasShownUnreadBanner(projectId)) {
+      return;
+    }
+    markUnreadBannerShown(projectId);
+    pushNotification({
+      id: `unread-banner-${projectId}`,
+      title:
+        unreadCount === 1
+          ? '1 unread feedback on this page'
+          : `${unreadCount} unread feedback items on this page`,
+      subtitle: 'Press C or the feedback button to view',
+    });
+  }, [loadingPins, feedbackMode, unreadCount, projectId, pushNotification]);
 
   useEffect(() => {
     if (!supabase) {
@@ -228,7 +324,10 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
           table: 'feedback_pins',
           filter: realtimeEqFilter('project_id', scope),
         },
-        () => {
+        (payload) => {
+          if (payload.eventType === 'INSERT' && payload.new) {
+            notifyIncomingPin(payload.new as FeedbackPinRecord);
+          }
           void loadPins();
         },
       )
@@ -236,7 +335,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [supabase, projectId, loadPins]);
+  }, [supabase, projectId, loadPins, notifyIncomingPin]);
 
   /* Other tabs / windows: refresh local pins when storage updates. */
   useEffect(() => {
@@ -246,12 +345,35 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     const key = getLocalFeedbackStorageKey(projectId);
     const onStorage = (e: StorageEvent) => {
       if (e.key === key) {
-        setPins(loadLocalPins(projectId));
+        const prevIds = new Set(pinsRef.current.map((p) => p.id));
+        const next = loadLocalPins(projectId);
+        for (const pin of next) {
+          if (!prevIds.has(pin.id)) {
+            notifyIncomingPin(pin);
+          }
+        }
+        setPins(next);
       }
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [supabase, projectId]);
+  }, [supabase, projectId, notifyIncomingPin]);
+
+  const openFeedbackForPin = useCallback(
+    (pinId?: string) => {
+      setFeedbackMode(true);
+      setDragRect(null);
+      dragRef.current = { active: false, startX: 0, startY: 0, pointerId: null };
+      if (pinId) {
+        const pin = pinsRef.current.find((p) => p.id === pinId);
+        if (pin) {
+          setPendingPin(null);
+          setSelectedPin(pin);
+        }
+      }
+    },
+    [],
+  );
 
   const toggleFeedbackMode = useCallback(() => {
     setFeedbackMode((m) => !m);
@@ -662,15 +784,19 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
         };
         appendLocalPin(record);
         setPendingPin(null);
+        setReadPinIds(markPinsRead(projectIdRef.current, [record.id]));
         setPins(loadLocalPins(projectIdRef.current));
         return;
       }
 
-      const { error } = await supabase.from('feedback_pins').insert(row);
+      const { data: inserted, error } = await supabase.from('feedback_pins').insert(row).select().single();
       if (error) {
         throw new Error(error.message);
       }
       setPendingPin(null);
+      if (inserted?.id) {
+        setReadPinIds(markPinsRead(projectIdRef.current, [inserted.id]));
+      }
       void loadPins();
     },
     [pendingPin, supabase, user, guestName, projectId, setGuestName, loadPins],
@@ -704,6 +830,10 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     syncPinLayerHeight,
     interactionProps,
     persistenceMode,
+    unreadCount,
+    notifications,
+    dismissNotification,
+    openFeedbackForPin,
   };
 
   return <ExpLabContext.Provider value={value}>{children}</ExpLabContext.Provider>;
