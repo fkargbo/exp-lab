@@ -41,21 +41,19 @@
 }
 
 /* In-app feedback alerts (new stakeholder feedback) */
+/* Stakeholder feedback alerts — always top-right (independent of comment-mode banner). */
 .exp-lab-notification-stack {
   position: fixed;
   top: 16px;
   right: 16px;
-  z-index: 2147483647;
+  left: auto;
+  z-index: 2147483648;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 10px;
   max-width: min(360px, calc(100vw - 32px));
   pointer-events: none;
-}
-
-.exp-lab-notification-stack--with-mode-banner {
-  top: 64px;
 }
 
 .exp-lab-notification-toast {

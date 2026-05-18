@@ -58,11 +58,11 @@ function NotificationToast({
 }
 
 export function FeedbackNotificationToasts() {
-  const { notifications, dismissNotification, openFeedbackForPin, feedbackMode } = useExpLab();
+  const { notifications, dismissNotification, openFeedbackForPin } = useExpLab();
 
   return (
     <motion.div
-      className={`exp-lab-notification-stack${feedbackMode ? ' exp-lab-notification-stack--with-mode-banner' : ''}`}
+      className="exp-lab-notification-stack"
       aria-live="polite"
       aria-label="Feedback notifications"
     >
