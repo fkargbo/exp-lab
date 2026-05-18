@@ -33,3 +33,26 @@ export function isPinAuthoredByCurrentUser(
 
   return false;
 }
+
+/** Delete requires a signed-in session that matches the pin author. */
+export function canSignedInUserDeletePin(pin: FeedbackPinRecord, user: User | null): boolean {
+  if (!user) {
+    return false;
+  }
+  const meta = user.user_metadata as Record<string, string | undefined>;
+  const githubId = meta.user_name ?? meta.preferred_username ?? null;
+  if (githubId && pin.author_github_id && pin.author_github_id === githubId) {
+    return true;
+  }
+  const displayName =
+    meta.full_name ||
+    meta.name ||
+    meta.user_name ||
+    meta.preferred_username ||
+    user.email?.split('@')[0] ||
+    null;
+  if (displayName && pin.author_name?.trim() === displayName.trim()) {
+    return true;
+  }
+  return false;
+}

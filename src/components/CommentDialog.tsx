@@ -278,7 +278,13 @@ export function CommentDialog() {
   const detail = selectedPin;
   const threadEntries = detail ? getPinThreadEntries(detail) : [];
   const guestIdentity = (guestName ?? getStoredGuestName() ?? '').trim() || null;
-  const canDeletePin = detail ? isPinAuthoredByCurrentUser(detail, user, guestName) : false;
+  const showDeletePin = detail ? isPinAuthoredByCurrentUser(detail, user, guestName) : false;
+  const deletePinRequiresSignIn = showDeletePin && !user;
+  const deletePinBusy = deleting || savingAppend || savingEdit;
+  const deletePinDisabled = deletePinRequiresSignIn || deletePinBusy;
+  const deletePinHint = deletePinRequiresSignIn
+    ? 'Sign in with GitHub to delete your feedback.'
+    : undefined;
 
   const onDeleteDetail = async () => {
     if (!detail) {
@@ -646,15 +652,22 @@ export function CommentDialog() {
                 ) : null}
 
                 <div className="exp-lab-actions-detail exp-lab-actions-detail--end">
-                  {canDeletePin ? (
-                    <button
-                      type="button"
-                      className="exp-lab-btn exp-lab-btn--danger"
-                      onClick={() => void onDeleteDetail()}
-                      disabled={deleting || savingAppend || savingEdit}
-                    >
-                      {deleting ? 'Deleting…' : 'Delete pin'}
-                    </button>
+                  {showDeletePin ? (
+                    <span className="exp-lab-delete-pin-wrap" title={deletePinHint}>
+                      <button
+                        type="button"
+                        className="exp-lab-btn exp-lab-btn--danger"
+                        onClick={() => void onDeleteDetail()}
+                        disabled={deletePinDisabled}
+                        aria-label={
+                          deletePinRequiresSignIn
+                            ? 'Delete pin (sign in with GitHub required)'
+                            : 'Delete pin'
+                        }
+                      >
+                        {deleting ? 'Deleting…' : 'Delete pin'}
+                      </button>
+                    </span>
                   ) : null}
                   <button
                     type="button"

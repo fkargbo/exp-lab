@@ -31,7 +31,7 @@ import {
   getPinThreadEntries,
   threadBodiesJoined,
 } from '../lib/pinThread';
-import { isPinAuthoredByCurrentUser } from '../lib/currentAuthor';
+import { canSignedInUserDeletePin, isPinAuthoredByCurrentUser } from '../lib/currentAuthor';
 import {
   formatUnreadFeedbackSummary,
   getDismissedAlertPinIds,
@@ -674,7 +674,10 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       if (!pin) {
         throw new Error('Pin not found.');
       }
-      if (!isPinAuthoredByCurrentUser(pin, userRef.current, guestNameRef.current)) {
+      if (!userRef.current) {
+        throw new Error('Sign in with GitHub to delete your feedback.');
+      }
+      if (!canSignedInUserDeletePin(pin, userRef.current)) {
         throw new Error('Only the pin author can delete this feedback.');
       }
 

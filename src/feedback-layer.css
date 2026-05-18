@@ -238,6 +238,16 @@
   cursor: not-allowed;
 }
 
+/* Tooltip on hover when delete is disabled (unsigned author). */
+.exp-lab-delete-pin-wrap {
+  display: inline-flex;
+  cursor: not-allowed;
+}
+
+.exp-lab-delete-pin-wrap:has(.exp-lab-btn:not(:disabled)) {
+  cursor: default;
+}
+
 .exp-lab-author-row {
   display: flex;
   align-items: center;
