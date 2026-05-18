@@ -44,6 +44,18 @@ import { getOAuthRedirectUrl } from '../lib/oauthRedirect';
 
 const DRAG_THRESHOLD_PX = 6;
 
+function mergePinIntoList(prev: FeedbackPinRecord[], pin: FeedbackPinRecord): FeedbackPinRecord[] {
+  const idx = prev.findIndex((p) => p.id === pin.id);
+  if (idx >= 0) {
+    const next = [...prev];
+    next[idx] = pin;
+    return next;
+  }
+  return [...prev, pin].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
+}
+
 type PendingPin =
   | {
       kind: 'point';
@@ -223,8 +235,27 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       revealUnreadAlertForPin(pin.id);
+      setReadPinIds((prev) => {
+        if (!prev.has(pin.id)) {
+          return prev;
+        }
+        const next = new Set(prev);
+        next.delete(pin.id);
+        return next;
+      });
     },
     [revealUnreadAlertForPin],
+  );
+
+  const applyRemotePinChange = useCallback(
+    (pin: FeedbackPinRecord) => {
+      if (pin.project_id !== projectIdRef.current) {
+        return;
+      }
+      setPins((prev) => mergePinIntoList(prev, pin));
+      notifyIncomingPin(pin);
+    },
+    [notifyIncomingPin],
   );
 
   const syncPinLayerHeight = useCallback(() => {
@@ -263,7 +294,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     return () => sub.subscription.unsubscribe();
   }, [supabase]);
 
-  const loadPins = useCallback(async () => {
+  const loadPins = useCallback(async (options?: { silent?: boolean }) => {
     const scope = projectIdRef.current;
 
     if (!supabase) {
@@ -272,7 +303,9 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    setLoadingPins(true);
+    if (!options?.silent) {
+      setLoadingPins(true);
+    }
     const { data, error } = await supabase
       .from('feedback_pins')
       .select('*')
@@ -283,10 +316,14 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    setLoadingPins(false);
+    if (!options?.silent) {
+      setLoadingPins(false);
+    }
     if (error) {
       console.warn('[ExP-Lab] load pins', error.message);
-      setPins([]);
+      if (!options?.silent) {
+        setPins([]);
+      }
       return;
     }
     setPins((data ?? []) as FeedbackPinRecord[]);
@@ -326,17 +363,25 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
           filter: realtimeEqFilter('project_id', scope),
         },
         (payload) => {
-          if (payload.eventType === 'INSERT' && payload.new) {
-            notifyIncomingPin(payload.new as FeedbackPinRecord);
+          if (payload.eventType === 'DELETE' && payload.old) {
+            const removed = payload.old as FeedbackPinRecord;
+            setPins((prev) => prev.filter((p) => p.id !== removed.id));
+            return;
           }
-          void loadPins();
+          if (
+            (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') &&
+            payload.new
+          ) {
+            applyRemotePinChange(payload.new as FeedbackPinRecord);
+          }
+          void loadPins({ silent: true });
         },
       )
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [supabase, projectId, loadPins, notifyIncomingPin]);
+  }, [supabase, projectId, loadPins, applyRemotePinChange]);
 
   /* Other tabs / windows: refresh local pins when storage updates. */
   useEffect(() => {
