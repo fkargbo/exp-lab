@@ -33,11 +33,10 @@ import {
 } from '../lib/pinThread';
 import { isPinAuthoredByCurrentUser } from '../lib/currentAuthor';
 import {
-  createNotificationId,
-  hasShownUnreadBanner,
-  markUnreadBannerShown,
-  type FeedbackNotificationItem,
-} from '../lib/feedbackNotifications';
+  formatUnreadFeedbackSummary,
+  getDismissedAlertPinIds,
+  saveDismissedAlertPinIds,
+} from '../lib/unreadFeedbackSummary';
 import { getReadPinIds, markPinsRead } from '../lib/feedbackReadState';
 import { getStoredGuestName, setStoredGuestName } from '../lib/storage';
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
@@ -100,10 +99,10 @@ type ExpLabContextValue = {
   persistenceMode: 'supabase' | 'local';
   /** Pins from others on this page not yet opened in feedback mode. */
   unreadCount: number;
-  /** Transient in-app alerts (new feedback, unread summary). */
-  notifications: FeedbackNotificationItem[];
-  dismissNotification: (id: string) => void;
-  /** Open feedback mode and optionally focus a pin (from toast / FAB). */
+  /** Dismissable top-right alert copy when there is unread feedback from others. */
+  unreadAlertSummary: { title: string; subtitle: string } | null;
+  dismissUnreadAlert: () => void;
+  /** Open feedback mode and optionally focus a pin (from alert). */
   openFeedbackForPin: (pinId?: string) => void;
 };
 
@@ -135,7 +134,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
   const [pendingPin, setPendingPin] = useState<PendingPin | null>(null);
   const [selectedPin, setSelectedPin] = useState<FeedbackPinRecord | null>(null);
   const [readPinIds, setReadPinIds] = useState<Set<string>>(() => new Set());
-  const [notifications, setNotifications] = useState<FeedbackNotificationItem[]>([]);
+  const [dismissedAlertPinIds, setDismissedAlertPinIds] = useState<Set<string>>(() => new Set());
 
   const dragRef = useRef<{
     active: boolean;
@@ -161,34 +160,59 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
   const supabaseReady = isSupabaseConfigured() && supabase !== null;
   const persistenceMode: 'supabase' | 'local' = supabase ? 'supabase' : 'local';
 
-  const dismissNotification = useCallback((id: string) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-  }, []);
-
-  const pushNotification = useCallback((item: Omit<FeedbackNotificationItem, 'id'> & { id?: string }) => {
-    const entry: FeedbackNotificationItem = {
-      id: item.id ?? createNotificationId(),
-      title: item.title,
-      subtitle: item.subtitle,
-      pinId: item.pinId,
-    };
-    setNotifications((prev) => {
-      const withoutDup = item.pinId ? prev.filter((n) => n.pinId !== item.pinId) : prev;
-      return [entry, ...withoutDup].slice(0, 5);
-    });
-  }, []);
-
   const markAllPinsReadForPage = useCallback(() => {
     const scope = projectIdRef.current;
     const ids = pinsRef.current.map((p) => p.id);
     setReadPinIds(markPinsRead(scope, ids));
   }, []);
 
-  const unreadCount = useMemo(() => {
+  const unreadPinsFromOthers = useMemo(() => {
     return pins.filter(
       (p) => !readPinIds.has(p.id) && !isPinAuthoredByCurrentUser(p, user, guestName),
-    ).length;
+    );
   }, [pins, readPinIds, user, guestName]);
+
+  const unreadCount = unreadPinsFromOthers.length;
+
+  const visibleUnreadPins = useMemo(() => {
+    return unreadPinsFromOthers.filter((p) => !dismissedAlertPinIds.has(p.id));
+  }, [unreadPinsFromOthers, dismissedAlertPinIds]);
+
+  const unreadAlertSummary = useMemo(() => {
+    if (feedbackMode || visibleUnreadPins.length === 0) {
+      return null;
+    }
+    const authors = visibleUnreadPins.map((p) => p.author_name?.trim() || 'Someone');
+    return formatUnreadFeedbackSummary(authors, visibleUnreadPins.length);
+  }, [feedbackMode, visibleUnreadPins]);
+
+  const dismissUnreadAlert = useCallback(() => {
+    const scope = projectIdRef.current;
+    const ids = visibleUnreadPins.map((p) => p.id);
+    if (ids.length === 0) {
+      return;
+    }
+    setDismissedAlertPinIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        next.add(id);
+      }
+      saveDismissedAlertPinIds(scope, next);
+      return next;
+    });
+  }, [visibleUnreadPins]);
+
+  const revealUnreadAlertForPin = useCallback((pinId: string) => {
+    setDismissedAlertPinIds((prev) => {
+      if (!prev.has(pinId)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.delete(pinId);
+      saveDismissedAlertPinIds(projectIdRef.current, next);
+      return next;
+    });
+  }, []);
 
   const notifyIncomingPin = useCallback(
     (pin: FeedbackPinRecord) => {
@@ -198,14 +222,9 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       if (isPinAuthoredByCurrentUser(pin, userRef.current, guestNameRef.current)) {
         return;
       }
-      const author = pin.author_name?.trim() || 'Someone';
-      pushNotification({
-        title: `${author} left feedback`,
-        subtitle: 'Open feedback to view the pin on this page',
-        pinId: pin.id,
-      });
+      revealUnreadAlertForPin(pin.id);
     },
-    [pushNotification],
+    [revealUnreadAlertForPin],
   );
 
   const syncPinLayerHeight = useCallback(() => {
@@ -279,9 +298,9 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     setPendingPin(null);
     setSelectedPin(null);
     setDragRect(null);
-    setNotifications([]);
     dragRef.current = { active: false, startX: 0, startY: 0, pointerId: null };
     setReadPinIds(getReadPinIds(projectId));
+    setDismissedAlertPinIds(getDismissedAlertPinIds(projectId));
     void loadPins();
   }, [projectId, loadPins]);
 
@@ -290,24 +309,6 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       markAllPinsReadForPage();
     }
   }, [feedbackMode, markAllPinsReadForPage]);
-
-  useEffect(() => {
-    if (loadingPins || feedbackMode || unreadCount === 0) {
-      return;
-    }
-    if (hasShownUnreadBanner(projectId)) {
-      return;
-    }
-    markUnreadBannerShown(projectId);
-    pushNotification({
-      id: `unread-banner-${projectId}`,
-      title:
-        unreadCount === 1
-          ? '1 unread feedback on this page'
-          : `${unreadCount} unread feedback items on this page`,
-      subtitle: 'Press C or the feedback button to view',
-    });
-  }, [loadingPins, feedbackMode, unreadCount, projectId, pushNotification]);
 
   useEffect(() => {
     if (!supabase) {
@@ -831,8 +832,8 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     interactionProps,
     persistenceMode,
     unreadCount,
-    notifications,
-    dismissNotification,
+    unreadAlertSummary,
+    dismissUnreadAlert,
     openFeedbackForPin,
   };
 

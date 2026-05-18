@@ -112,54 +112,6 @@
   margin-top: 4px;
 }
 
-/* Floating entry to feedback mode + unread badge */
-.exp-lab-fab {
-  position: fixed;
-  right: 20px;
-  bottom: 24px;
-  z-index: 2147483647;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  border: 1px solid var(--exp-lab-border);
-  background: var(--exp-lab-bg);
-  color: var(--exp-lab-accent);
-  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.15);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: auto;
-  padding: 0;
-}
-
-.exp-lab-fab:hover {
-  background: #f0f7ff;
-  border-color: var(--exp-lab-accent);
-}
-
-.exp-lab-fab:focus-visible {
-  outline: 2px solid var(--exp-lab-accent);
-  outline-offset: 2px;
-}
-
-.exp-lab-fab__badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: #c9190b;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 20px;
-  text-align: center;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-}
-
 /*
  * Dialog is portaled to document.body (outside `.exp-lab-ui`), so design tokens must be
  * defined here or `var(--exp-lab-bg)` etc. resolve to transparent / wrong colors.
