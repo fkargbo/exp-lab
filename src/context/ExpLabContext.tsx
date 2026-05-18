@@ -38,7 +38,7 @@ import {
   saveDismissedAlertPinIds,
 } from '../lib/unreadFeedbackSummary';
 import { getReadPinIds, markPinsRead } from '../lib/feedbackReadState';
-import { getStoredGuestName, setStoredGuestName } from '../lib/storage';
+import { getStoredGuestName, resolveGuestDisplayName, setStoredGuestName } from '../lib/storage';
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 import { getOAuthRedirectUrl } from '../lib/oauthRedirect';
 
@@ -78,12 +78,12 @@ type ExpLabContextValue = {
   pendingPin: PendingPin | null;
   openCommentForPending: (p: PendingPin) => void;
   dismissPending: () => void;
-  submitComment: (text: string) => Promise<void>;
+  submitComment: (text: string, guestDisplayName?: string) => Promise<void>;
   selectedPin: FeedbackPinRecord | null;
   openPinDetail: (pin: FeedbackPinRecord) => void;
   closePinDetail: () => void;
   /** Append a new thread message on an existing pin (Supabase or local storage). */
-  appendPinFeedback: (pinId: string, text: string) => Promise<void>;
+  appendPinFeedback: (pinId: string, text: string, guestDisplayName?: string) => Promise<void>;
   /** Update an existing thread message (author-only; Supabase or local storage). */
   updatePinThreadEntry: (pinId: string, entryId: string, newBody: string) => Promise<void>;
   /** Remove a saved pin (Supabase or local storage). Closes detail view on success. */
@@ -593,7 +593,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
   );
 
   const appendPinFeedback = useCallback(
-    async (pinId: string, text: string) => {
+    async (pinId: string, text: string, guestDisplayName?: string) => {
       const trimmed = text.trim();
       if (!trimmed) {
         throw new Error('Enter a comment.');
@@ -609,7 +609,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       let author_github_id: string | null = author?.githubId ?? null;
 
       if (!author_name) {
-        const g = guestName?.trim() || getStoredGuestName()?.trim();
+        const g = resolveGuestDisplayName(guestDisplayName, guestName);
         if (!g) {
           throw new Error('Name required');
         }
@@ -734,7 +734,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
   );
 
   const submitComment = useCallback(
-    async (text: string) => {
+    async (text: string, guestDisplayName?: string) => {
       if (!pendingPin) {
         return;
       }
@@ -744,7 +744,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       let author_github_id: string | null = author?.githubId ?? null;
 
       if (!author_name) {
-        const g = guestName?.trim() || getStoredGuestName()?.trim();
+        const g = resolveGuestDisplayName(guestDisplayName, guestName);
         if (!g) {
           throw new Error('Name required');
         }

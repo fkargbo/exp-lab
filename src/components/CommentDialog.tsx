@@ -4,7 +4,7 @@ import type { MouseEvent } from 'react';
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useExpLab } from '../context/ExpLabContext';
-import { getStoredGuestName } from '../lib/storage';
+import { getStoredGuestName, resolveGuestDisplayName } from '../lib/storage';
 import { isPinAuthoredByCurrentUser } from '../lib/currentAuthor';
 import { canUserEditThreadEntry, getPinThreadEntries } from '../lib/pinThread';
 import type { AuthorInfo, FeedbackThreadEntry } from '../types';
@@ -204,8 +204,15 @@ export function CommentDialog() {
   const [editError, setEditError] = useState<string | null>(null);
 
   const pendingCommentRef = useRef<HTMLTextAreaElement>(null);
+  const pendingNameRef = useRef<HTMLInputElement>(null);
   const appendTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const detailNameRef = useRef<HTMLInputElement>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const guestNameRequiredMessage =
+    persistenceMode === 'local'
+      ? 'Enter your name in the "Your name" field above.'
+      : 'Enter your name in the "Your name" field (GitHub sign-in is optional).';
 
   useEffect(() => {
     setMounted(true);
@@ -245,19 +252,23 @@ export function CommentDialog() {
     if (!pendingPin) {
       return;
     }
-    const el = pendingCommentRef.current;
-    if (!el) {
+    if (!authorDisplay && !resolveGuestDisplayName(nameInput, guestName)) {
+      pendingNameRef.current?.focus();
       return;
     }
-    el.focus();
-  }, [pendingPin]);
+    pendingCommentRef.current?.focus();
+  }, [pendingPin, authorDisplay, nameInput, guestName]);
 
   useLayoutEffect(() => {
     if (!selectedPin || editingEntryId) {
       return;
     }
+    if (!authorDisplay && !resolveGuestDisplayName(nameInput, guestName)) {
+      detailNameRef.current?.focus();
+      return;
+    }
     appendTextareaRef.current?.focus();
-  }, [selectedPin?.id, editingEntryId]);
+  }, [selectedPin?.id, editingEntryId, authorDisplay, nameInput, guestName]);
 
   useLayoutEffect(() => {
     if (!editingEntryId) {
@@ -318,18 +329,17 @@ export function CommentDialog() {
     setSavingAppend(true);
     setAppendError(null);
     try {
-      if (!authorDisplay && !(nameInput.trim() || guestName?.trim())) {
-        throw new Error(
-          persistenceMode === 'local' ? 'Enter your name.' : 'Enter your name or sign in with GitHub.',
-        );
+      const guestLabel = resolveGuestDisplayName(nameInput, guestName);
+      if (!authorDisplay && !guestLabel) {
+        throw new Error(guestNameRequiredMessage);
       }
       if (!appendText.trim()) {
         throw new Error('Enter your feedback message.');
       }
-      if (!authorDisplay && nameInput.trim()) {
-        setGuestName(nameInput.trim());
+      if (!authorDisplay && guestLabel) {
+        setGuestName(guestLabel);
       }
-      await appendPinFeedback(detail.id, appendText);
+      await appendPinFeedback(detail.id, appendText, guestLabel ?? undefined);
       setAppendText('');
     } catch (e) {
       setAppendError(e instanceof Error ? e.message : 'Could not post feedback.');
@@ -362,18 +372,17 @@ export function CommentDialog() {
     setSaving(true);
     setError(null);
     try {
-      if (!authorDisplay && !(nameInput.trim() || guestName?.trim())) {
-        throw new Error(
-          persistenceMode === 'local' ? 'Enter your name.' : 'Enter your name or sign in with GitHub.',
-        );
+      const guestLabel = resolveGuestDisplayName(nameInput, guestName);
+      if (!authorDisplay && !guestLabel) {
+        throw new Error(guestNameRequiredMessage);
       }
       if (!text.trim()) {
         throw new Error('Enter a comment.');
       }
-      if (!authorDisplay && nameInput.trim()) {
-        setGuestName(nameInput.trim());
+      if (!authorDisplay && guestLabel) {
+        setGuestName(guestLabel);
       }
-      await submitComment(text);
+      await submitComment(text, guestLabel ?? undefined);
       setText('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save comment.');
@@ -464,10 +473,15 @@ export function CommentDialog() {
                         </button>
                       </>
                     ) : (
-                      <button type="button" className="exp-lab-btn exp-lab-btn--ghost" onClick={() => void signInWithGitHub()}>
-                        <Github size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} aria-hidden />
-                        Sign in with GitHub
-                      </button>
+                      <>
+                        <button type="button" className="exp-lab-btn exp-lab-btn--ghost" onClick={() => void signInWithGitHub()}>
+                          <Github size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} aria-hidden />
+                          Sign in with GitHub
+                        </button>
+                        <span style={{ fontSize: 13, color: 'var(--exp-lab-muted)' }}>
+                          or enter your name below
+                        </span>
+                      </>
                     )}
                   </div>
                 ) : (
@@ -492,13 +506,16 @@ export function CommentDialog() {
 
                 {!authorDisplay ? (
                   <div className="exp-lab-field">
-                    <label htmlFor="exp-lab-name">Your name</label>
+                    <label htmlFor="exp-lab-name">Your name (required)</label>
                     <input
+                      ref={pendingNameRef}
                       id="exp-lab-name"
                       value={nameInput}
                       onChange={(e) => setNameInput(e.target.value)}
                       placeholder="Guest name"
                       autoComplete="name"
+                      required
+                      aria-required="true"
                     />
                   </div>
                 ) : null}
@@ -617,13 +634,16 @@ export function CommentDialog() {
 
                 {!authorDisplay ? (
                   <div className="exp-lab-field">
-                    <label htmlFor="exp-lab-name-detail">Your name</label>
+                    <label htmlFor="exp-lab-name-detail">Your name (required)</label>
                     <input
+                      ref={detailNameRef}
                       id="exp-lab-name-detail"
                       value={nameInput}
                       onChange={(e) => setNameInput(e.target.value)}
                       placeholder="Guest name"
                       autoComplete="name"
+                      required
+                      aria-required="true"
                     />
                   </div>
                 ) : null}
