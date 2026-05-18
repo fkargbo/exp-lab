@@ -204,9 +204,7 @@ export function CommentDialog() {
   const [editError, setEditError] = useState<string | null>(null);
 
   const pendingCommentRef = useRef<HTMLTextAreaElement>(null);
-  const pendingNameRef = useRef<HTMLInputElement>(null);
   const appendTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const detailNameRef = useRef<HTMLInputElement>(null);
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const guestNameRequiredMessage =
@@ -247,28 +245,6 @@ export function CommentDialog() {
     setDeleteError(null);
     setDeleting(false);
   }, [selectedPin?.id]);
-
-  useLayoutEffect(() => {
-    if (!pendingPin) {
-      return;
-    }
-    if (!authorDisplay && !resolveGuestDisplayName(nameInput, guestName)) {
-      pendingNameRef.current?.focus();
-      return;
-    }
-    pendingCommentRef.current?.focus();
-  }, [pendingPin, authorDisplay, nameInput, guestName]);
-
-  useLayoutEffect(() => {
-    if (!selectedPin || editingEntryId) {
-      return;
-    }
-    if (!authorDisplay && !resolveGuestDisplayName(nameInput, guestName)) {
-      detailNameRef.current?.focus();
-      return;
-    }
-    appendTextareaRef.current?.focus();
-  }, [selectedPin?.id, editingEntryId, authorDisplay, nameInput, guestName]);
 
   useLayoutEffect(() => {
     if (!editingEntryId) {
@@ -506,9 +482,8 @@ export function CommentDialog() {
 
                 {!authorDisplay ? (
                   <div className="exp-lab-field">
-                    <label htmlFor="exp-lab-name">Your name (required)</label>
+                    <label htmlFor="exp-lab-name">Your name</label>
                     <input
-                      ref={pendingNameRef}
                       id="exp-lab-name"
                       value={nameInput}
                       onChange={(e) => setNameInput(e.target.value)}
@@ -634,9 +609,8 @@ export function CommentDialog() {
 
                 {!authorDisplay ? (
                   <div className="exp-lab-field">
-                    <label htmlFor="exp-lab-name-detail">Your name (required)</label>
+                    <label htmlFor="exp-lab-name-detail">Your name</label>
                     <input
-                      ref={detailNameRef}
                       id="exp-lab-name-detail"
                       value={nameInput}
                       onChange={(e) => setNameInput(e.target.value)}
