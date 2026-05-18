@@ -40,5 +40,7 @@ export type FeedbackPinRecord = {
   author_name: string | null;
   author_avatar_url: string | null;
   author_github_id: string | null;
+  /** Set for guest pins so this browser can delete via Supabase when RLS matches the token. */
+  guest_author_token?: string | null;
   created_at: string;
 };

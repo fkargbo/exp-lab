@@ -37,7 +37,18 @@ import {
   getDismissedAlertPinIds,
   saveDismissedAlertPinIds,
 } from '../lib/unreadFeedbackSummary';
+import { getGuestAuthorToken } from '../lib/guestAuthorToken';
+import {
+  forgetGuestPinToken,
+  guestPinDeleteToken,
+  rememberGuestPinToken,
+} from '../lib/guestPinOwnership';
 import { getReadPinIds, markPinsRead } from '../lib/feedbackReadState';
+import {
+  clearLocallyDeletedPin,
+  filterOutLocallyDeletedPins,
+  markPinLocallyDeleted,
+} from '../lib/localDeletedPins';
 import { getStoredGuestName, setStoredGuestName } from '../lib/storage';
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 import { getOAuthRedirectUrl } from '../lib/oauthRedirect';
@@ -267,7 +278,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     const scope = projectIdRef.current;
 
     if (!supabase) {
-      setPins(loadLocalPins(scope));
+      setPins(filterOutLocallyDeletedPins(scope, loadLocalPins(scope)));
       setLoadingPins(false);
       return;
     }
@@ -289,7 +300,9 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       setPins([]);
       return;
     }
-    setPins((data ?? []) as FeedbackPinRecord[]);
+    setPins(
+      filterOutLocallyDeletedPins(scope, (data ?? []) as FeedbackPinRecord[]),
+    );
   }, [supabase]);
 
   useEffect(() => {
@@ -564,6 +577,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
 
   const deletePin = useCallback(
     async (pinId: string) => {
+      const scope = projectIdRef.current;
       const pin =
         pinsRef.current.find((p) => p.id === pinId) ??
         (selectedPin?.id === pinId ? selectedPin : undefined);
@@ -573,20 +587,52 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       if (!isPinAuthoredByCurrentUser(pin, userRef.current, guestNameRef.current)) {
         throw new Error('Only the pin author can delete this feedback.');
       }
+
+      const removePinFromUi = () => {
+        setPins((prev) => prev.filter((p) => p.id !== pinId));
+        setSelectedPin(null);
+      };
+
       if (!supabase) {
-        removeLocalPin(projectId, pinId);
-        setPins(loadLocalPins(projectId));
+        removeLocalPin(scope, pinId);
+        clearLocallyDeletedPin(scope, pinId);
+        forgetGuestPinToken(scope, pinId);
+        setPins(filterOutLocallyDeletedPins(scope, loadLocalPins(scope)));
         setSelectedPin(null);
         return;
       }
-      const { error } = await supabase.from('feedback_pins').delete().eq('id', pinId);
+
+      let query = supabase.from('feedback_pins').delete().eq('id', pinId);
+      const guestToken = !pin.author_github_id
+        ? guestPinDeleteToken(pin, scope) ?? getGuestAuthorToken()
+        : null;
+      if (guestToken) {
+        query = query.eq('guest_author_token', guestToken);
+      }
+
+      const { data, error } = await query.select('id');
       if (error) {
         throw new Error(error.message);
       }
-      setSelectedPin(null);
+
+      if (!data?.length) {
+        if (!pin.author_github_id) {
+          markPinLocallyDeleted(scope, pinId);
+          forgetGuestPinToken(scope, pinId);
+          removePinFromUi();
+          return;
+        }
+        throw new Error(
+          'Could not delete this feedback. Sign in with GitHub or check Supabase delete permissions.',
+        );
+      }
+
+      clearLocallyDeletedPin(scope, pinId);
+      forgetGuestPinToken(scope, pinId);
+      removePinFromUi();
       void loadPins();
     },
-    [supabase, projectId, loadPins, selectedPin],
+    [supabase, loadPins, selectedPin],
   );
 
   const appendPinFeedback = useCallback(
@@ -793,18 +839,36 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
           created_at: new Date().toISOString(),
         };
         appendLocalPin(record);
+        if (!author_github_id) {
+          rememberGuestPinToken(projectIdRef.current, record.id);
+        }
         setPendingPin(null);
         setReadPinIds(markPinsRead(projectIdRef.current, [record.id]));
-        setPins(loadLocalPins(projectIdRef.current));
+        setPins(filterOutLocallyDeletedPins(projectIdRef.current, loadLocalPins(projectIdRef.current)));
         return;
       }
 
-      const { data: inserted, error } = await supabase.from('feedback_pins').insert(row).select().single();
-      if (error) {
-        throw new Error(error.message);
+      const guestToken = author_github_id ? null : getGuestAuthorToken();
+      let insertResult = await supabase
+        .from('feedback_pins')
+        .insert(guestToken ? { ...row, guest_author_token: guestToken } : row)
+        .select()
+        .single();
+
+      if (insertResult.error && guestToken) {
+        insertResult = await supabase.from('feedback_pins').insert(row).select().single();
       }
+
+      if (insertResult.error) {
+        throw new Error(insertResult.error.message);
+      }
+      const inserted = insertResult.data as FeedbackPinRecord;
+
       setPendingPin(null);
-      if (inserted?.id) {
+      if (inserted?.id && !author_github_id) {
+        rememberGuestPinToken(projectIdRef.current, inserted.id, guestToken ?? undefined);
+        setReadPinIds(markPinsRead(projectIdRef.current, [inserted.id]));
+      } else if (inserted?.id) {
         setReadPinIds(markPinsRead(projectIdRef.current, [inserted.id]));
       }
       void loadPins();

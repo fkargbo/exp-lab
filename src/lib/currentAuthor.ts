@@ -1,6 +1,9 @@
 import type { User } from '@supabase/supabase-js';
 import type { FeedbackPinRecord } from '../types';
+import { getGuestAuthorToken } from './guestAuthorToken';
+import { getRememberedGuestPinToken } from './guestPinOwnership';
 import { getStoredGuestName } from './storage';
+import { getProjectId } from './projectId';
 
 /** True when this pin was created by the current signed-in or guest identity. */
 export function isPinAuthoredByCurrentUser(
@@ -8,6 +11,13 @@ export function isPinAuthoredByCurrentUser(
   user: User | null,
   guestName: string | null,
 ): boolean {
+  const browserToken = getGuestAuthorToken();
+  const pinToken =
+    pin.guest_author_token?.trim() || getRememberedGuestPinToken(getProjectId(), pin.id);
+  if (pinToken) {
+    return browserToken === pinToken;
+  }
+
   if (user) {
     const meta = user.user_metadata as Record<string, string | undefined>;
     const githubId = meta.user_name ?? meta.preferred_username ?? null;
