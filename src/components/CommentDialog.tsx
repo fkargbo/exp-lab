@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 're
 import { createPortal } from 'react-dom';
 import { useExpLab } from '../context/ExpLabContext';
 import { getStoredGuestName } from '../lib/storage';
+import { isPinAuthoredByCurrentUser } from '../lib/currentAuthor';
 import { canUserEditThreadEntry, getPinThreadEntries } from '../lib/pinThread';
 import type { AuthorInfo, FeedbackThreadEntry } from '../types';
 
@@ -172,6 +173,7 @@ export function CommentDialog() {
     submitComment,
     persistenceMode,
     authorDisplay,
+    user,
     guestName,
     setGuestName,
     signInWithGitHub,
@@ -289,6 +291,7 @@ export function CommentDialog() {
   const detail = selectedPin;
   const threadEntries = detail ? getPinThreadEntries(detail) : [];
   const guestIdentity = (guestName ?? getStoredGuestName() ?? '').trim() || null;
+  const canDeletePin = detail ? isPinAuthoredByCurrentUser(detail, user, guestName) : false;
 
   const onDeleteDetail = async () => {
     if (!detail) {
@@ -649,14 +652,16 @@ export function CommentDialog() {
                 ) : null}
 
                 <div className="exp-lab-actions-detail exp-lab-actions-detail--end">
-                  <button
-                    type="button"
-                    className="exp-lab-btn exp-lab-btn--danger"
-                    onClick={() => void onDeleteDetail()}
-                    disabled={deleting || savingAppend || savingEdit}
-                  >
-                    {deleting ? 'Deleting…' : 'Delete pin'}
-                  </button>
+                  {canDeletePin ? (
+                    <button
+                      type="button"
+                      className="exp-lab-btn exp-lab-btn--danger"
+                      onClick={() => void onDeleteDetail()}
+                      disabled={deleting || savingAppend || savingEdit}
+                    >
+                      {deleting ? 'Deleting…' : 'Delete pin'}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="exp-lab-btn exp-lab-btn--primary"

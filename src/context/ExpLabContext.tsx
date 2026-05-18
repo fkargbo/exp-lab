@@ -564,6 +564,15 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
 
   const deletePin = useCallback(
     async (pinId: string) => {
+      const pin =
+        pinsRef.current.find((p) => p.id === pinId) ??
+        (selectedPin?.id === pinId ? selectedPin : undefined);
+      if (!pin) {
+        throw new Error('Pin not found.');
+      }
+      if (!isPinAuthoredByCurrentUser(pin, userRef.current, guestNameRef.current)) {
+        throw new Error('Only the pin author can delete this feedback.');
+      }
       if (!supabase) {
         removeLocalPin(projectId, pinId);
         setPins(loadLocalPins(projectId));
@@ -577,7 +586,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       setSelectedPin(null);
       void loadPins();
     },
-    [supabase, projectId, loadPins],
+    [supabase, projectId, loadPins, selectedPin],
   );
 
   const appendPinFeedback = useCallback(
