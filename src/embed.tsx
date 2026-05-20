@@ -2,35 +2,16 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import cssText from './feedback-layer.css?inline';
+import { subscribeAnnotationSurfaceSync, syncAnnotationSurfaceLayers } from './lib/annotationSurface';
 
 const HOST_ID = 'exp-lab-feedback-host';
 
-function syncLayerDimensions() {
-  const h = Math.max(
-    document.documentElement.scrollHeight,
-    document.body.scrollHeight,
-    document.documentElement.clientHeight,
-  );
-  for (const id of ['exp-lab-interaction-root', 'exp-lab-pin-root']) {
-    const el = document.getElementById(id);
-    if (el) {
-      el.style.height = `${h}px`;
-    }
-  }
-}
-
 function ensurePageLayers() {
-  syncLayerDimensions();
-
   let interaction = document.getElementById('exp-lab-interaction-root');
   if (!interaction) {
     interaction = document.createElement('div');
     interaction.id = 'exp-lab-interaction-root';
     Object.assign(interaction.style, {
-      position: 'absolute',
-      left: '0',
-      top: '0',
-      width: '100%',
       pointerEvents: 'none',
       /* Below shadow host + pin markers; surface child uses pointer-events auto when active. */
       zIndex: '2147483644',
@@ -43,10 +24,6 @@ function ensurePageLayers() {
     pins = document.createElement('div');
     pins.id = 'exp-lab-pin-root';
     Object.assign(pins.style, {
-      position: 'absolute',
-      left: '0',
-      top: '0',
-      width: '100%',
       pointerEvents: 'none',
       /* Above shadow UI host so pin/region markers are visible in comment mode */
       zIndex: '2147483646',
@@ -54,7 +31,7 @@ function ensurePageLayers() {
     document.body.appendChild(pins);
   }
 
-  syncLayerDimensions();
+  syncAnnotationSurfaceLayers();
 }
 
 export function mountExpLabFeedbackLayer(): void {
@@ -101,6 +78,8 @@ export function mountExpLabFeedbackLayer(): void {
       <App />
     </React.StrictMode>,
   );
+
+  subscribeAnnotationSurfaceSync();
 }
 
 mountExpLabFeedbackLayer();

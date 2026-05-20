@@ -42,6 +42,13 @@ import { getReadPinIds, markPinsRead } from '../lib/feedbackReadState';
 import { getStoredGuestName, resolveGuestDisplayName, setStoredGuestName } from '../lib/storage';
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 import { getOAuthRedirectUrl } from '../lib/oauthRedirect';
+import {
+  getAnnotationRootMetrics,
+  pointerToPercent,
+  pointerToRootLocal,
+  resolveAnnotationRoot,
+  syncAnnotationSurfaceLayers,
+} from '../lib/annotationSurface';
 
 const DRAG_THRESHOLD_PX = 6;
 /** Fallback when Realtime is off or filters miss (common with URL-shaped project_id). */
@@ -261,17 +268,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
   );
 
   const syncPinLayerHeight = useCallback(() => {
-    const h = Math.max(
-      document.documentElement.scrollHeight,
-      document.body.scrollHeight,
-      document.documentElement.clientHeight,
-    );
-    for (const id of ['exp-lab-pin-root', 'exp-lab-interaction-root'] as const) {
-      const el = document.getElementById(id);
-      if (el) {
-        el.style.height = `${h}px`;
-      }
-    }
+    syncAnnotationSurfaceLayers();
   }, []);
 
   useEffect(() => {
@@ -529,20 +526,6 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [toggleFeedbackMode, pendingPin, selectedPin]);
 
-  const docMetrics = useCallback(() => {
-    const scrollWidth = Math.max(
-      document.documentElement.scrollWidth,
-      document.body.scrollWidth,
-      window.innerWidth,
-    );
-    const scrollHeight = Math.max(
-      document.documentElement.scrollHeight,
-      document.body.scrollHeight,
-      window.innerHeight,
-    );
-    return { scrollWidth, scrollHeight };
-  }, []);
-
   const openCommentForPending = useCallback((p: PendingPin) => {
     setPendingPin(p);
     setSelectedPin(null);
@@ -562,10 +545,12 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       if (!feedbackMode || e.button !== 0) {
         return;
       }
+      const root = resolveAnnotationRoot();
+      const { x, y } = pointerToRootLocal(e.clientX, e.clientY, root);
       dragRef.current = {
         active: true,
-        startX: e.clientX + window.scrollX,
-        startY: e.clientY + window.scrollY,
+        startX: x,
+        startY: y,
         pointerId: e.pointerId,
       };
       setDragRect(null);
@@ -576,8 +561,8 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       if (!feedbackMode || !dragRef.current.active || dragRef.current.pointerId !== e.pointerId) {
         return;
       }
-      const cx = e.clientX + window.scrollX;
-      const cy = e.clientY + window.scrollY;
+      const root = resolveAnnotationRoot();
+      const { x: cx, y: cy } = pointerToRootLocal(e.clientX, e.clientY, root);
       const dx = cx - dragRef.current.startX;
       const dy = cy - dragRef.current.startY;
       if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) {
@@ -604,13 +589,13 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
         /* ignore */
       }
 
-      const cx = e.clientX + window.scrollX;
-      const cy = e.clientY + window.scrollY;
+      const root = resolveAnnotationRoot();
+      const { x: cx, y: cy } = pointerToRootLocal(e.clientX, e.clientY, root);
       const dx = cx - dragRef.current.startX;
       const dy = cy - dragRef.current.startY;
       const dist = Math.hypot(dx, dy);
 
-      const { scrollWidth, scrollHeight } = docMetrics();
+      const { width: surfaceWidth, height: surfaceHeight } = getAnnotationRootMetrics(root);
 
       const sx = dragRef.current.startX;
       const sy = dragRef.current.startY;
@@ -622,15 +607,14 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
         const width = Math.abs(cx - sx);
         const height = Math.abs(cy - sy);
         if (width > 2 && height > 2) {
-          const w_pct = (width / scrollWidth) * 100;
-          const h_pct = (height / scrollHeight) * 100;
-          const x_pct = (left / scrollWidth) * 100;
-          const y_pct = (top / scrollHeight) * 100;
+          const w_pct = (width / surfaceWidth) * 100;
+          const h_pct = (height / surfaceHeight) * 100;
+          const x_pct = (left / surfaceWidth) * 100;
+          const y_pct = (top / surfaceHeight) * 100;
           openCommentForPending({ kind: 'region', x_pct, y_pct, w_pct, h_pct });
         }
       } else {
-        const x_pct = (cx / scrollWidth) * 100;
-        const y_pct = (cy / scrollHeight) * 100;
+        const { x_pct, y_pct } = pointerToPercent(e.clientX, e.clientY, root);
         openCommentForPending({ kind: 'point', x_pct, y_pct });
       }
 
@@ -639,7 +623,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     };
 
     return { onPointerDown, onPointerMove, onPointerUp };
-  }, [feedbackMode, docMetrics, openCommentForPending]);
+  }, [feedbackMode, openCommentForPending]);
 
   const setGuestName = useCallback((name: string) => {
     setStoredGuestName(name);

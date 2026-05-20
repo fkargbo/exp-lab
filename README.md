@@ -107,8 +107,9 @@ The handler expects a Supabase webhook-style JSON body with a `record` object.
 
 ## Architecture notes
 
-- **Shadow DOM** hosts toast/dialog so styles stay isolated; **portaled** layers (`exp-lab-pin-root`, `exp-lab-interaction-root`) live on `document.body` for full-page coordinates — the same stylesheet is injected into `document.head` for those layers.
-- Coordinates are stored as **percentages** of document width/height so pins survive resize.
+- **Shadow DOM** hosts toast/dialog so styles stay isolated; **portaled** layers (`exp-lab-pin-root`, `exp-lab-interaction-root`) align to an **annotation root** element for full-page coordinates — the same stylesheet is injected into `document.head` for those layers.
+- Coordinates are stored as **percentages of the annotation root** (not the viewport) so pins and region highlights stay aligned when the window is resized.
+- Host prototypes can mark the stable layout box with **`data-exp-lab-annotation-root`** (e.g. the max-width content column). Resolution order: that attribute → `main[role="main"]` → PatternFly page main → `document.documentElement`.
 
 ## Testing inside this repo (Observability Agentic prototype)
 
