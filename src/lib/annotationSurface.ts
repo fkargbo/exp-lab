@@ -1,6 +1,6 @@
 /**
  * Single coordinate system for pin placement, region highlights, and rendering.
- * Anchors to a stable content root so responsive layouts keep pins aligned across viewports.
+ * Interaction capture uses the visible viewport; pins anchor to an expanded page root.
  */
 
 const ANNOTATION_ROOT_SELECTORS = [
@@ -8,6 +8,12 @@ const ANNOTATION_ROOT_SELECTORS = [
   'main[role="main"]',
   '.pf-v6-c-page__main',
   '.pf-v6-c-page__main-container',
+];
+
+/** Host page wrappers that should include headers/siblings outside a narrow inner column. */
+const ANNOTATION_ROOT_EXPAND_SELECTORS = [
+  '[data-exp-lab-annotation-boundary]',
+  '.ols-ai-hub-page',
 ];
 
 export type AnnotationRootRect = {
@@ -19,14 +25,40 @@ export type AnnotationRootRect = {
   height: number;
 };
 
+function hasPositiveSize(el: HTMLElement): boolean {
+  const { width, height } = el.getBoundingClientRect();
+  return width > 0 && height > 0;
+}
+
+/** Prefer a page-level wrapper so header + main share one coordinate system. */
+export function expandMarkedAnnotationRoot(marked: HTMLElement): HTMLElement {
+  for (const selector of ANNOTATION_ROOT_EXPAND_SELECTORS) {
+    const el = marked.closest<HTMLElement>(selector);
+    if (el && hasPositiveSize(el)) {
+      return el;
+    }
+  }
+
+  const main = marked.closest<HTMLElement>('main[role="main"], main');
+  if (main?.parentElement && hasPositiveSize(main.parentElement)) {
+    return main.parentElement;
+  }
+
+  return marked;
+}
+
 export function resolveAnnotationRoot(): HTMLElement {
+  const marked = document.querySelector<HTMLElement>('[data-exp-lab-annotation-root]');
+  if (marked && hasPositiveSize(marked)) {
+    return expandMarkedAnnotationRoot(marked);
+  }
+
   for (const selector of ANNOTATION_ROOT_SELECTORS) {
-    const el = document.querySelector<HTMLElement>(selector);
-    if (!el) {
+    if (selector === '[data-exp-lab-annotation-root]') {
       continue;
     }
-    const { width, height } = el.getBoundingClientRect();
-    if (width > 0 && height > 0) {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (el && hasPositiveSize(el)) {
       return el;
     }
   }
@@ -93,32 +125,52 @@ export function percentToRootLocal(
   };
 }
 
-const LAYER_IDS = ['exp-lab-pin-root', 'exp-lab-interaction-root'] as const;
+const PIN_LAYER_ID = 'exp-lab-pin-root';
+const INTERACTION_LAYER_ID = 'exp-lab-interaction-root';
 
-/** Position/size portal layers to match the annotation root exactly. */
-export function syncAnnotationSurfaceLayers(root: HTMLElement = resolveAnnotationRoot()): void {
-  const { pageLeft, pageTop, width, height } = getAnnotationRootPageRect(root);
-  for (const id of LAYER_IDS) {
-    const el = document.getElementById(id);
-    if (!el) {
-      continue;
-    }
-    Object.assign(el.style, {
-      position: 'absolute',
-      left: `${pageLeft}px`,
-      top: `${pageTop}px`,
-      width: `${width}px`,
-      height: `${height}px`,
-      boxSizing: 'border-box',
-    });
+/** Full-viewport hit target so every visible pixel accepts pin placement. */
+export function syncInteractionLayerToViewport(): void {
+  const el = document.getElementById(INTERACTION_LAYER_ID);
+  if (!el) {
+    return;
   }
+  Object.assign(el.style, {
+    position: 'fixed',
+    left: '0',
+    top: '0',
+    width: '100vw',
+    height: '100vh',
+    boxSizing: 'border-box',
+  });
+}
+
+function syncPinLayerToAnnotationRoot(root: HTMLElement = resolveAnnotationRoot()): void {
+  const el = document.getElementById(PIN_LAYER_ID);
+  if (!el) {
+    return;
+  }
+  const { pageLeft, pageTop, width, height } = getAnnotationRootPageRect(root);
+  Object.assign(el.style, {
+    position: 'absolute',
+    left: `${pageLeft}px`,
+    top: `${pageTop}px`,
+    width: `${width}px`,
+    height: `${height}px`,
+    boxSizing: 'border-box',
+  });
+}
+
+/** Position portal layers: viewport capture + annotation-root pin canvas. */
+export function syncAnnotationSurfaceLayers(root: HTMLElement = resolveAnnotationRoot()): void {
+  syncInteractionLayerToViewport();
+  syncPinLayerToAnnotationRoot(root);
 }
 
 let resizeObserver: ResizeObserver | null = null;
 let observedRoot: HTMLElement | null = null;
 
 /** Keep overlay aligned when the root or viewport changes size. */
-export function subscribeAnnotationSurfaceSync(onSync?: () => void): () => void {
+export function subscribeAnnotationSurfaceSync(onSync?: () => void): void {
   const runSync = () => {
     syncAnnotationSurfaceLayers();
     onSync?.();
@@ -147,4 +199,12 @@ export function subscribeAnnotationSurfaceSync(onSync?: () => void): () => void 
     resizeObserver = null;
     observedRoot = null;
   };
+}
+
+export function setPinLayerPlacementMode(placing: boolean): void {
+  const el = document.getElementById(PIN_LAYER_ID);
+  if (!el) {
+    return;
+  }
+  el.classList.toggle('exp-lab-pin-root--placing', placing);
 }

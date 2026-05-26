@@ -2,6 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useExpLab } from '../context/ExpLabContext';
 import { EXP_LAB_COMMENT_CURSOR } from '../lib/commentCursor';
+import { setPinLayerPlacementMode } from '../lib/annotationSurface';
 
 export function InteractionLayer() {
   const { feedbackMode, dragRect, interactionProps, syncPinLayerHeight, pendingPin, selectedPin } =
@@ -22,12 +23,14 @@ export function InteractionLayer() {
     }
     const prev = document.body.style.cursor;
     const placing = feedbackMode && !pendingPin && !selectedPin;
+    setPinLayerPlacementMode(placing);
     if (placing) {
       document.body.style.cursor = EXP_LAB_COMMENT_CURSOR;
     } else {
       document.body.style.cursor = '';
     }
     return () => {
+      setPinLayerPlacementMode(false);
       document.body.style.cursor = prev;
     };
   }, [feedbackMode, pendingPin, selectedPin]);
