@@ -23,6 +23,8 @@ export type FeedbackThreadEntry = {
   created_at: string;
 };
 
+export type PinCoordinateSpace = 'content' | 'viewport';
+
 export type FeedbackPinRecord = {
   id: string;
   project_id: string;
@@ -31,6 +33,12 @@ export type FeedbackPinRecord = {
   y_pct: number;
   w_pct: number | null;
   h_pct: number | null;
+  /** `content` = scrollable prototype canvas; `viewport` = masthead/sidebar/chrome outside canvas. */
+  coordinate_space?: PinCoordinateSpace | null;
+  /** Optional DOM anchor for layout-stable pin position (local + future server). */
+  anchor_selector?: string | null;
+  anchor_x_pct?: number | null;
+  anchor_y_pct?: number | null;
   /** Denormalized join of thread bodies; kept for search / legacy. Prefer `comment_entries`. */
   comment_text: string;
   /** When present and non-empty, authoritative thread; otherwise derive from `comment_text` + pin author. */

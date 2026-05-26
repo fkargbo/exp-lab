@@ -43,12 +43,19 @@ import { getStoredGuestName, resolveGuestDisplayName, setStoredGuestName } from 
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 import { getOAuthRedirectUrl } from '../lib/oauthRedirect';
 import {
-  getAnnotationRootMetrics,
+  getAnnotationContentSize,
   pointerToPercent,
   pointerToRootLocal,
-  resolveAnnotationRoot,
+  pointerToViewportPercent,
+  resolveScrollableAnnotationRoot,
   syncAnnotationSurfaceLayers,
 } from '../lib/annotationSurface';
+import {
+  captureElementAnchor,
+  isPointerInContentRoot,
+  type PinPlacement,
+} from '../lib/pinAnchor';
+import { mergePlacementOverlays, savePinPlacementOverlay } from '../lib/pinPlacementOverlay';
 
 const DRAG_THRESHOLD_PX = 6;
 /** Fallback when Realtime is off or filters miss (common with URL-shaped project_id). */
@@ -66,19 +73,47 @@ function mergePinIntoList(prev: FeedbackPinRecord[], pin: FeedbackPinRecord): Fe
   );
 }
 
-type PendingPin =
-  | {
-      kind: 'point';
-      x_pct: number;
-      y_pct: number;
-    }
-  | {
-      kind: 'region';
-      x_pct: number;
-      y_pct: number;
-      w_pct: number;
-      h_pct: number;
+type PendingPin = PinPlacement & {
+  kind: 'point' | 'region';
+};
+
+function buildPendingPlacement(
+  clientX: number,
+  clientY: number,
+  region?: { x_pct: number; y_pct: number; w_pct: number; h_pct: number },
+): PendingPin {
+  const contentRoot = resolveScrollableAnnotationRoot();
+  const inContent = isPointerInContentRoot(clientX, clientY, contentRoot);
+  const anchor = captureElementAnchor(clientX, clientY);
+
+  if (region) {
+    return {
+      kind: 'region',
+      coordinate_space: inContent ? 'content' : 'viewport',
+      x_pct: region.x_pct,
+      y_pct: region.y_pct,
+      w_pct: region.w_pct,
+      h_pct: region.h_pct,
+      ...anchor,
     };
+  }
+
+  if (inContent) {
+    return {
+      kind: 'point',
+      coordinate_space: 'content',
+      ...pointerToPercent(clientX, clientY, contentRoot),
+      ...anchor,
+    };
+  }
+
+  return {
+    kind: 'point',
+    coordinate_space: 'viewport',
+    ...pointerToViewportPercent(clientX, clientY),
+    ...anchor,
+  };
+}
 
 type DragRect = { left: number; top: number; width: number; height: number };
 
@@ -314,7 +349,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      setPins(scoped);
+      setPins(mergePlacementOverlays(scoped));
     },
     [notifyIncomingPin],
   );
@@ -323,7 +358,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     const scope = projectIdRef.current;
 
     if (!supabase) {
-      setPins(loadLocalPins(scope));
+      setPins(mergePlacementOverlays(loadLocalPins(scope)));
       setLoadingPins(false);
       return;
     }
@@ -545,7 +580,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       if (!feedbackMode || e.button !== 0) {
         return;
       }
-      const root = resolveAnnotationRoot();
+      const root = resolveScrollableAnnotationRoot();
       const { x, y } = pointerToRootLocal(e.clientX, e.clientY, root);
       dragRef.current = {
         active: true,
@@ -561,7 +596,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       if (!feedbackMode || !dragRef.current.active || dragRef.current.pointerId !== e.pointerId) {
         return;
       }
-      const root = resolveAnnotationRoot();
+      const root = resolveScrollableAnnotationRoot();
       const { x: cx, y: cy } = pointerToRootLocal(e.clientX, e.clientY, root);
       const dx = cx - dragRef.current.startX;
       const dy = cy - dragRef.current.startY;
@@ -589,13 +624,13 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
         /* ignore */
       }
 
-      const root = resolveAnnotationRoot();
+      const root = resolveScrollableAnnotationRoot();
       const { x: cx, y: cy } = pointerToRootLocal(e.clientX, e.clientY, root);
       const dx = cx - dragRef.current.startX;
       const dy = cy - dragRef.current.startY;
       const dist = Math.hypot(dx, dy);
 
-      const { width: surfaceWidth, height: surfaceHeight } = getAnnotationRootMetrics(root);
+      const { width: surfaceWidth, height: surfaceHeight } = getAnnotationContentSize(root);
 
       const sx = dragRef.current.startX;
       const sy = dragRef.current.startY;
@@ -611,11 +646,15 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
           const h_pct = (height / surfaceHeight) * 100;
           const x_pct = (left / surfaceWidth) * 100;
           const y_pct = (top / surfaceHeight) * 100;
-          openCommentForPending({ kind: 'region', x_pct, y_pct, w_pct, h_pct });
+          const rootRect = root.getBoundingClientRect();
+          const centerClientX = rootRect.left - root.scrollLeft + left + width / 2;
+          const centerClientY = rootRect.top - root.scrollTop + top + height / 2;
+          openCommentForPending(
+            buildPendingPlacement(centerClientX, centerClientY, { x_pct, y_pct, w_pct, h_pct }),
+          );
         }
       } else {
-        const { x_pct, y_pct } = pointerToPercent(e.clientX, e.clientY, root);
-        openCommentForPending({ kind: 'point', x_pct, y_pct });
+        openCommentForPending(buildPendingPlacement(e.clientX, e.clientY));
       }
 
       dragRef.current = { active: false, startX: 0, startY: 0, pointerId: null };
@@ -860,6 +899,13 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
         author_github_id,
       };
 
+      const placement = {
+        coordinate_space: pendingPin.coordinate_space,
+        anchor_selector: pendingPin.anchor_selector ?? null,
+        anchor_x_pct: pendingPin.anchor_x_pct ?? null,
+        anchor_y_pct: pendingPin.anchor_y_pct ?? null,
+      };
+
       const row =
         pendingPin.kind === 'point'
           ? {
@@ -869,14 +915,16 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
               y_pct: pendingPin.y_pct,
               w_pct: null,
               h_pct: null,
+              ...placement,
             }
           : {
               ...base,
               kind: 'region' as FeedbackPinKind,
               x_pct: pendingPin.x_pct,
               y_pct: pendingPin.y_pct,
-              w_pct: pendingPin.w_pct,
-              h_pct: pendingPin.h_pct,
+              w_pct: pendingPin.w_pct ?? null,
+              h_pct: pendingPin.h_pct ?? null,
+              ...placement,
             };
 
       if (!supabase) {
@@ -892,9 +940,24 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const { data: inserted, error } = await supabase.from('feedback_pins').insert(row).select().single();
+      let insertedPlacementStripped = false;
+      let { data: inserted, error } = await supabase.from('feedback_pins').insert(row).select().single();
+      if (error && /column|schema|unknown/i.test(error.message)) {
+        insertedPlacementStripped = true;
+        const { coordinate_space: _cs, anchor_selector: _as, anchor_x_pct: _ax, anchor_y_pct: _ay, ...legacyRow } =
+          row as typeof row & Record<string, unknown>;
+        ({ data: inserted, error } = await supabase.from('feedback_pins').insert(legacyRow).select().single());
+      }
       if (error) {
         throw new Error(error.message);
+      }
+      if (inserted?.id && insertedPlacementStripped) {
+        savePinPlacementOverlay(inserted.id, {
+          coordinate_space: pendingPin.coordinate_space,
+          anchor_selector: pendingPin.anchor_selector ?? null,
+          anchor_x_pct: pendingPin.anchor_x_pct ?? null,
+          anchor_y_pct: pendingPin.anchor_y_pct ?? null,
+        });
       }
       setPendingPin(null);
       if (inserted?.id) {

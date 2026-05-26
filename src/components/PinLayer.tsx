@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { FeedbackPinRecord } from '../types';
 import { useExpLab } from '../context/ExpLabContext';
 import { getPinChrome } from '../lib/authorPinColor';
+import { resolvePinMarkerLayout } from '../lib/pinAnchor';
 import { getPinMarkerAuthor } from '../lib/pinThread';
 
 function initials(name: string | null): string {
@@ -17,33 +18,40 @@ function initials(name: string | null): string {
 }
 
 function PinMarker({ pin, onOpen }: { pin: FeedbackPinRecord; onOpen: (p: FeedbackPinRecord) => void }) {
+  const [layoutTick, setLayoutTick] = useState(0);
+
+  useEffect(() => {
+    const bump = () => setLayoutTick((n) => n + 1);
+    window.addEventListener('resize', bump);
+    window.addEventListener('scroll', bump, true);
+    return () => {
+      window.removeEventListener('resize', bump);
+      window.removeEventListener('scroll', bump, true);
+    };
+  }, []);
+
+  const layout = useMemo(() => resolvePinMarkerLayout(pin), [pin, layoutTick]);
   const chrome = getPinChrome(pin);
   const markerAuthor = getPinMarkerAuthor(pin);
-  let leftPct = pin.x_pct;
-  let topPct = pin.y_pct;
-  if (pin.kind === 'region' && pin.w_pct != null && pin.h_pct != null) {
-    leftPct = pin.x_pct + pin.w_pct / 2;
-    topPct = pin.y_pct + pin.h_pct / 2;
-  }
-  const left = `${leftPct}%`;
-  const top = `${topPct}%`;
 
   const markerStyle: React.CSSProperties = {
-    left,
-    top,
+    position: layout.position,
+    left: layout.marker.left,
+    top: layout.marker.top,
     ...chrome.markerStyle,
   };
 
-  if (pin.kind === 'region' && pin.w_pct != null && pin.h_pct != null) {
+  if (layout.region) {
     return (
       <React.Fragment key={pin.id}>
         <div
           className="exp-lab-region"
           style={{
-            left: `${pin.x_pct}%`,
-            top: `${pin.y_pct}%`,
-            width: `${pin.w_pct}%`,
-            height: `${pin.h_pct}%`,
+            position: layout.position,
+            left: layout.region.left,
+            top: layout.region.top,
+            width: layout.region.width,
+            height: layout.region.height,
             ...chrome.regionStyle,
           }}
         />

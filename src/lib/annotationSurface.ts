@@ -1,6 +1,7 @@
 /**
- * Single coordinate system for pin placement, region highlights, and rendering.
- * Interaction capture uses the visible viewport; pins anchor to an expanded page root.
+ * Coordinate system for pin placement and rendering.
+ * - Interaction capture: full viewport (fixed layer).
+ * - Pin canvas: inside the scrollable annotation root so pins move with content.
  */
 
 const ANNOTATION_ROOT_SELECTORS = [
@@ -10,17 +11,20 @@ const ANNOTATION_ROOT_SELECTORS = [
   '.pf-v6-c-page__main-container',
 ];
 
-/** Host page wrappers that should include headers/siblings outside a narrow inner column. */
+const SCROLLABLE_CONTENT_SELECTORS = [
+  '.ols-ai-hub-page',
+  '.ols-observe-overview-page',
+  '[data-exp-lab-annotation-root]',
+];
+
 const ANNOTATION_ROOT_EXPAND_SELECTORS = [
   '[data-exp-lab-annotation-boundary]',
   '.ols-ai-hub-page',
 ];
 
 export type AnnotationRootRect = {
-  /** Page X of root origin (for positioning overlay layers). */
   pageLeft: number;
   pageTop: number;
-  /** Size used for % ↔ pixel conversion (matches overlay box). */
   width: number;
   height: number;
 };
@@ -30,7 +34,15 @@ function hasPositiveSize(el: HTMLElement): boolean {
   return width > 0 && height > 0;
 }
 
-/** Prefer a page-level wrapper so header + main share one coordinate system. */
+function isScrollableY(el: HTMLElement): boolean {
+  const style = getComputedStyle(el);
+  const oy = style.overflowY;
+  if (oy !== 'auto' && oy !== 'scroll' && oy !== 'overlay') {
+    return false;
+  }
+  return el.scrollHeight > el.clientHeight + 1;
+}
+
 export function expandMarkedAnnotationRoot(marked: HTMLElement): HTMLElement {
   for (const selector of ANNOTATION_ROOT_EXPAND_SELECTORS) {
     const el = marked.closest<HTMLElement>(selector);
@@ -47,10 +59,28 @@ export function expandMarkedAnnotationRoot(marked: HTMLElement): HTMLElement {
   return marked;
 }
 
-export function resolveAnnotationRoot(): HTMLElement {
+/** Scrollport that moves with prototype content (pins mount inside this element). */
+export function resolveScrollableAnnotationRoot(): HTMLElement {
   const marked = document.querySelector<HTMLElement>('[data-exp-lab-annotation-root]');
   if (marked && hasPositiveSize(marked)) {
-    return expandMarkedAnnotationRoot(marked);
+    const expanded = expandMarkedAnnotationRoot(marked);
+    if (isScrollableY(expanded)) {
+      return expanded;
+    }
+    for (const selector of SCROLLABLE_CONTENT_SELECTORS) {
+      const inner = expanded.querySelector<HTMLElement>(selector);
+      if (inner && hasPositiveSize(inner) && isScrollableY(inner)) {
+        return inner;
+      }
+    }
+    return expanded;
+  }
+
+  for (const selector of SCROLLABLE_CONTENT_SELECTORS) {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (el && hasPositiveSize(el)) {
+      return el;
+    }
   }
 
   for (const selector of ANNOTATION_ROOT_SELECTORS) {
@@ -62,11 +92,17 @@ export function resolveAnnotationRoot(): HTMLElement {
       return el;
     }
   }
+
   return document.documentElement;
 }
 
-/** Metrics for converting between pointer position and stored percentages. */
-export function getAnnotationRootMetrics(root: HTMLElement = resolveAnnotationRoot()): {
+/** @deprecated Use resolveScrollableAnnotationRoot — kept for imports. */
+export function resolveAnnotationRoot(): HTMLElement {
+  return resolveScrollableAnnotationRoot();
+}
+
+/** Content size used for % ↔ pixel (must match pin layer box). */
+export function getAnnotationContentSize(root: HTMLElement = resolveScrollableAnnotationRoot()): {
   width: number;
   height: number;
 } {
@@ -76,23 +112,32 @@ export function getAnnotationRootMetrics(root: HTMLElement = resolveAnnotationRo
   };
 }
 
-/** Root box in page coordinates — overlay layers align to this rect. */
-export function getAnnotationRootPageRect(root: HTMLElement = resolveAnnotationRoot()): AnnotationRootRect {
-  const rect = root.getBoundingClientRect();
-  const { width, height } = getAnnotationRootMetrics(root);
-  return {
-    pageLeft: rect.left + window.scrollX,
-    pageTop: rect.top + window.scrollY,
-    width,
-    height,
-  };
+export function getAnnotationRootMetrics(root: HTMLElement = resolveScrollableAnnotationRoot()): {
+  width: number;
+  height: number;
+} {
+  return getAnnotationContentSize(root);
 }
 
-/** Pointer position relative to the annotation root (layer-local pixels). */
-export function pointerToRootLocal(clientX: number, clientY: number, root: HTMLElement = resolveAnnotationRoot()): {
-  x: number;
-  y: number;
-} {
+export function getAnnotationRootPageRect(root: HTMLElement = resolveScrollableAnnotationRoot()): AnnotationRootRect {
+  const { width, height } = getAnnotationContentSize(root);
+  let pageLeft = 0;
+  let pageTop = 0;
+  let node: HTMLElement | null = root;
+  while (node) {
+    pageLeft += node.offsetLeft;
+    pageTop += node.offsetTop;
+    node = node.offsetParent as HTMLElement | null;
+  }
+  return { pageLeft, pageTop, width, height };
+}
+
+/** Pointer position in content coordinates (scroll-aware). */
+export function pointerToRootLocal(
+  clientX: number,
+  clientY: number,
+  root: HTMLElement = resolveScrollableAnnotationRoot(),
+): { x: number; y: number } {
   const rect = root.getBoundingClientRect();
   return {
     x: clientX - rect.left + root.scrollLeft,
@@ -103,9 +148,9 @@ export function pointerToRootLocal(clientX: number, clientY: number, root: HTMLE
 export function pointerToPercent(
   clientX: number,
   clientY: number,
-  root: HTMLElement = resolveAnnotationRoot(),
+  root: HTMLElement = resolveScrollableAnnotationRoot(),
 ): { x_pct: number; y_pct: number } {
-  const { width, height } = getAnnotationRootMetrics(root);
+  const { width, height } = getAnnotationContentSize(root);
   const { x, y } = pointerToRootLocal(clientX, clientY, root);
   return {
     x_pct: (x / width) * 100,
@@ -113,12 +158,21 @@ export function pointerToPercent(
   };
 }
 
+export function pointerToViewportPercent(clientX: number, clientY: number): { x_pct: number; y_pct: number } {
+  const w = Math.max(window.innerWidth, 1);
+  const h = Math.max(window.innerHeight, 1);
+  return {
+    x_pct: (clientX / w) * 100,
+    y_pct: (clientY / h) * 100,
+  };
+}
+
 export function percentToRootLocal(
   x_pct: number,
   y_pct: number,
-  root: HTMLElement = resolveAnnotationRoot(),
+  root: HTMLElement = resolveScrollableAnnotationRoot(),
 ): { x: number; y: number } {
-  const { width, height } = getAnnotationRootMetrics(root);
+  const { width, height } = getAnnotationContentSize(root);
   return {
     x: (x_pct / 100) * width,
     y: (y_pct / 100) * height,
@@ -128,7 +182,6 @@ export function percentToRootLocal(
 const PIN_LAYER_ID = 'exp-lab-pin-root';
 const INTERACTION_LAYER_ID = 'exp-lab-interaction-root';
 
-/** Full-viewport hit target so every visible pixel accepts pin placement. */
 export function syncInteractionLayerToViewport(): void {
   const el = document.getElementById(INTERACTION_LAYER_ID);
   if (!el) {
@@ -144,24 +197,43 @@ export function syncInteractionLayerToViewport(): void {
   });
 }
 
-function syncPinLayerToAnnotationRoot(root: HTMLElement = resolveAnnotationRoot()): void {
-  const el = document.getElementById(PIN_LAYER_ID);
+function ensurePinLayerElement(): HTMLElement | null {
+  let el = document.getElementById(PIN_LAYER_ID);
+  if (el) {
+    return el;
+  }
+  el = document.createElement('div');
+  el.id = PIN_LAYER_ID;
+  Object.assign(el.style, {
+    pointerEvents: 'none',
+    zIndex: '2147483646',
+  });
+  document.body.appendChild(el);
+  return el;
+}
+
+function syncPinLayerToAnnotationRoot(root: HTMLElement = resolveScrollableAnnotationRoot()): void {
+  const el = ensurePinLayerElement();
   if (!el) {
     return;
   }
-  const { pageLeft, pageTop, width, height } = getAnnotationRootPageRect(root);
+
+  if (el.parentElement !== root) {
+    root.appendChild(el);
+  }
+
+  const { width, height } = getAnnotationContentSize(root);
   Object.assign(el.style, {
     position: 'absolute',
-    left: `${pageLeft}px`,
-    top: `${pageTop}px`,
+    left: '0',
+    top: '0',
     width: `${width}px`,
     height: `${height}px`,
     boxSizing: 'border-box',
   });
 }
 
-/** Position portal layers: viewport capture + annotation-root pin canvas. */
-export function syncAnnotationSurfaceLayers(root: HTMLElement = resolveAnnotationRoot()): void {
+export function syncAnnotationSurfaceLayers(root: HTMLElement = resolveScrollableAnnotationRoot()): void {
   syncInteractionLayerToViewport();
   syncPinLayerToAnnotationRoot(root);
 }
@@ -169,7 +241,6 @@ export function syncAnnotationSurfaceLayers(root: HTMLElement = resolveAnnotatio
 let resizeObserver: ResizeObserver | null = null;
 let observedRoot: HTMLElement | null = null;
 
-/** Keep overlay aligned when the root or viewport changes size. */
 export function subscribeAnnotationSurfaceSync(onSync?: () => void): void {
   const runSync = () => {
     syncAnnotationSurfaceLayers();
@@ -184,7 +255,7 @@ export function subscribeAnnotationSurfaceSync(onSync?: () => void): void {
 
   if (typeof ResizeObserver !== 'undefined') {
     resizeObserver?.disconnect();
-    observedRoot = resolveAnnotationRoot();
+    observedRoot = resolveScrollableAnnotationRoot();
     resizeObserver = new ResizeObserver(() => runSync());
     resizeObserver.observe(observedRoot);
     if (observedRoot !== document.documentElement) {
