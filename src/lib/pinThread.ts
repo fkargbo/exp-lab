@@ -57,7 +57,7 @@ export type PinEntryAuthor = {
  * Whether the current viewer may edit a thread message (GitHub id match, or guest name match).
  * For guests, `guestIdentity` should be the persisted guest name (not an unsaved text field).
  */
-export function canUserEditThreadEntry(
+function canUserManageOwnThreadEntry(
   entry: FeedbackThreadEntry,
   authorDisplay: AuthorInfo | null,
   guestIdentity: string | null,
@@ -73,6 +73,24 @@ export function canUserEditThreadEntry(
   const g = (guestIdentity ?? '').trim();
   const en = (entry.author_name ?? '').trim();
   return Boolean(g && en && g.toLowerCase() === en.toLowerCase());
+}
+
+/** Whether the current viewer may edit a thread message they authored. */
+export function canUserEditThreadEntry(
+  entry: FeedbackThreadEntry,
+  authorDisplay: AuthorInfo | null,
+  guestIdentity: string | null,
+): boolean {
+  return canUserManageOwnThreadEntry(entry, authorDisplay, guestIdentity);
+}
+
+/** Whether the current viewer may delete a thread message they authored. */
+export function canUserDeleteThreadEntry(
+  entry: FeedbackThreadEntry,
+  authorDisplay: AuthorInfo | null,
+  guestIdentity: string | null,
+): boolean {
+  return canUserManageOwnThreadEntry(entry, authorDisplay, guestIdentity);
 }
 
 export function createThreadEntry(body: string, author: PinEntryAuthor): FeedbackThreadEntry {

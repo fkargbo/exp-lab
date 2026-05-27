@@ -23,9 +23,11 @@ import {
   getLocalFeedbackStorageKey,
   loadLocalPins,
   removeLocalPin,
+  removeLocalPinEntry,
   updateLocalPinEntry,
 } from '../lib/localFeedbackStore';
 import {
+  canUserDeleteThreadEntry,
   canUserEditThreadEntry,
   createThreadEntry,
   getPinThreadEntries,
@@ -143,6 +145,8 @@ type ExpLabContextValue = {
   appendPinFeedback: (pinId: string, text: string, guestDisplayName?: string) => Promise<void>;
   /** Update an existing thread message (author-only; Supabase or local storage). */
   updatePinThreadEntry: (pinId: string, entryId: string, newBody: string) => Promise<void>;
+  /** Delete one thread message the current user authored (not the whole pin). */
+  deletePinThreadEntry: (pinId: string, entryId: string) => Promise<void>;
   /** Remove a saved pin (Supabase or local storage). Closes detail view on success. */
   deletePin: (pinId: string) => Promise<void>;
   dragRect: DragRect | null;
@@ -709,6 +713,9 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (!supabase) {
+        if (!isPinAuthoredByCurrentUser(pin, userRef.current, guestNameRef.current)) {
+          throw new Error('Only the pin author can delete this feedback.');
+        }
         removeLocalPin(scope, pinId);
         setPins(loadLocalPins(scope));
         setSelectedPin(null);
@@ -866,6 +873,68 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     [supabase, projectId, pins, selectedPin, user, guestName, loadPins],
   );
 
+  const deletePinThreadEntry = useCallback(
+    async (pinId: string, entryId: string) => {
+      const pin =
+        pins.find((p) => p.id === pinId) ?? (selectedPin?.id === pinId ? selectedPin : undefined);
+      if (!pin) {
+        throw new Error('Pin not found.');
+      }
+      const entries = getPinThreadEntries(pin);
+      const entry = entries.find((e) => e.id === entryId);
+      if (!entry) {
+        throw new Error('Message not found.');
+      }
+
+      const guestIdentity = (guestName ?? getStoredGuestName() ?? '').trim() || null;
+      if (!canUserDeleteThreadEntry(entry, authorFromUser(user), guestIdentity)) {
+        throw new Error('You can only delete your own messages.');
+      }
+
+      const merged = entries.filter((e) => e.id !== entryId);
+      const joined = threadBodiesJoined(merged);
+      const last = merged[merged.length - 1];
+
+      if (!supabase) {
+        removeLocalPinEntry(projectId, pinId, entryId);
+        const fresh = loadLocalPins(projectId).find((p) => p.id === pinId);
+        if (fresh) {
+          setSelectedPin(fresh);
+        }
+        setPins(loadLocalPins(projectId));
+        return;
+      }
+
+      const { error } = await supabase
+        .from('feedback_pins')
+        .update({
+          comment_entries: merged,
+          comment_text: joined,
+          author_name: last?.author_name ?? pin.author_name,
+          author_avatar_url: last?.author_avatar_url ?? pin.author_avatar_url,
+          author_github_id: last?.author_github_id ?? pin.author_github_id,
+        })
+        .eq('id', pinId);
+      if (error) {
+        throw new Error(error.message);
+      }
+      setSelectedPin((prev) =>
+        prev && prev.id === pinId
+          ? {
+              ...prev,
+              comment_entries: merged,
+              comment_text: joined,
+              author_name: last?.author_name ?? pin.author_name,
+              author_avatar_url: last?.author_avatar_url ?? pin.author_avatar_url,
+              author_github_id: last?.author_github_id ?? pin.author_github_id,
+            }
+          : prev,
+      );
+      void loadPins();
+    },
+    [supabase, projectId, pins, selectedPin, user, guestName, loadPins],
+  );
+
   const submitComment = useCallback(
     async (text: string, guestDisplayName?: string) => {
       if (!pendingPin) {
@@ -995,6 +1064,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     closePinDetail,
     appendPinFeedback,
     updatePinThreadEntry,
+    deletePinThreadEntry,
     deletePin,
     dragRect,
     syncPinLayerHeight,

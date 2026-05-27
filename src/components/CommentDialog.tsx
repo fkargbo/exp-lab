@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { useExpLab } from '../context/ExpLabContext';
 import { getStoredGuestName, resolveGuestDisplayName } from '../lib/storage';
 import { isPinAuthoredByCurrentUser } from '../lib/currentAuthor';
-import { canUserEditThreadEntry, getPinThreadEntries } from '../lib/pinThread';
+import { canUserDeleteThreadEntry, canUserEditThreadEntry, getPinThreadEntries } from '../lib/pinThread';
 import type { AuthorInfo, FeedbackThreadEntry } from '../types';
 
 function initials(name: string | null): string {
@@ -20,7 +20,13 @@ function initials(name: string | null): string {
   return name.slice(0, 2).toUpperCase();
 }
 
-function ThreadEntryOverflowMenu({ onEdit }: { onEdit: () => void }) {
+function ThreadEntryOverflowMenu({
+  onEdit,
+  onDelete,
+}: {
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -62,6 +68,17 @@ function ThreadEntryOverflowMenu({ onEdit }: { onEdit: () => void }) {
           >
             Edit
           </button>
+          <button
+            type="button"
+            className="exp-lab-entry-overflow__item exp-lab-entry-overflow__item--danger"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+          >
+            Delete
+          </button>
         </div>
       ) : null}
     </div>
@@ -76,8 +93,10 @@ type ThreadEntryRowProps = {
   editDraft: string;
   editError: string | null;
   savingEdit: boolean;
+  deletingEntry: boolean;
   editTextareaRef: RefObject<HTMLTextAreaElement | null>;
   onStartEdit: () => void;
+  onDelete: () => void;
   onEditDraftChange: (value: string) => void;
   onCancelEdit: () => void;
   onSaveEdit: () => void;
@@ -91,13 +110,16 @@ function ThreadEntryRow({
   editDraft,
   editError,
   savingEdit,
+  deletingEntry,
   editTextareaRef,
   onStartEdit,
+  onDelete,
   onEditDraftChange,
   onCancelEdit,
   onSaveEdit,
 }: ThreadEntryRowProps) {
   const canEdit = canUserEditThreadEntry(entry, authorDisplay, guestIdentity);
+  const canDelete = canUserDeleteThreadEntry(entry, authorDisplay, guestIdentity);
 
   return (
     <div className="exp-lab-thread-entry">
@@ -122,7 +144,9 @@ function ThreadEntryRow({
               {new Date(entry.created_at).toLocaleString()}
             </time>
           </div>
-          {canEdit && !isEditing ? <ThreadEntryOverflowMenu onEdit={onStartEdit} /> : null}
+          {canEdit && canDelete && !isEditing ? (
+            <ThreadEntryOverflowMenu onEdit={onStartEdit} onDelete={onDelete} />
+          ) : null}
         </div>
         {isEditing ? (
           <div className="exp-lab-thread-entry__edit">
@@ -133,14 +157,14 @@ function ThreadEntryRow({
               onChange={(e) => onEditDraftChange(e.target.value)}
               rows={4}
               aria-label="Edit message"
-              disabled={savingEdit}
+              disabled={savingEdit || deletingEntry}
             />
             <div className="exp-lab-thread-entry__edit-actions">
               <button
                 type="button"
                 className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--sm"
                 onClick={onCancelEdit}
-                disabled={savingEdit}
+                disabled={savingEdit || deletingEntry}
               >
                 Cancel
               </button>
@@ -148,7 +172,7 @@ function ThreadEntryRow({
                 type="button"
                 className="exp-lab-btn exp-lab-btn--primary exp-lab-btn--sm"
                 onClick={() => void onSaveEdit()}
-                disabled={savingEdit || !editDraft.trim()}
+                disabled={savingEdit || deletingEntry || !editDraft.trim()}
               >
                 {savingEdit ? 'Saving…' : 'Save'}
               </button>
@@ -184,6 +208,7 @@ export function CommentDialog() {
     deletePin,
     appendPinFeedback,
     updatePinThreadEntry,
+    deletePinThreadEntry,
   } = useExpLab();
 
   const [text, setText] = useState('');
@@ -202,6 +227,8 @@ export function CommentDialog() {
   const [editDraft, setEditDraft] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null);
+  const [deleteEntryError, setDeleteEntryError] = useState<string | null>(null);
 
   const pendingCommentRef = useRef<HTMLTextAreaElement>(null);
   const appendTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -239,6 +266,8 @@ export function CommentDialog() {
     setEditingEntryId(null);
     setEditDraft('');
     setEditError(null);
+    setDeleteEntryError(null);
+    setDeletingEntryId(null);
   }, [selectedPin?.id]);
 
   useEffect(() => {
@@ -280,7 +309,7 @@ export function CommentDialog() {
   const guestIdentity = (guestName ?? getStoredGuestName() ?? '').trim() || null;
   const showDeletePin = detail ? isPinAuthoredByCurrentUser(detail, user, guestName) : false;
   const deletePinRequiresSignIn = showDeletePin && !user;
-  const deletePinBusy = deleting || savingAppend || savingEdit;
+  const deletePinBusy = deleting || savingAppend || savingEdit || Boolean(deletingEntryId);
   const deletePinDisabled = deletePinRequiresSignIn || deletePinBusy;
   const deletePinHint = deletePinRequiresSignIn
     ? 'Sign in with GitHub to delete your feedback.'
@@ -347,6 +376,28 @@ export function CommentDialog() {
     }
   };
 
+  const onDeleteThreadEntry = async (entryId: string) => {
+    if (!detail) {
+      return;
+    }
+    if (!window.confirm('Delete this feedback message? This cannot be undone.')) {
+      return;
+    }
+    setDeletingEntryId(entryId);
+    setDeleteEntryError(null);
+    try {
+      await deletePinThreadEntry(detail.id, entryId);
+      if (editingEntryId === entryId) {
+        setEditingEntryId(null);
+        setEditDraft('');
+      }
+    } catch (e) {
+      setDeleteEntryError(e instanceof Error ? e.message : 'Could not delete feedback message.');
+    } finally {
+      setDeletingEntryId(null);
+    }
+  };
+
   const onSubmit = async () => {
     if (!pendingPin) {
       return;
@@ -398,7 +449,7 @@ export function CommentDialog() {
             if (pendingPin && saving) {
               return;
             }
-            if (selectedPin && (savingAppend || deleting || savingEdit)) {
+            if (selectedPin && (savingAppend || deleting || savingEdit || Boolean(deletingEntryId))) {
               return;
             }
             dialogClose();
@@ -536,7 +587,7 @@ export function CommentDialog() {
                       className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--icon exp-lab-dialog-close"
                       aria-label="Close"
                       onClick={closePinDetail}
-                      disabled={deleting || savingAppend || savingEdit}
+                      disabled={deleting || savingAppend || savingEdit || Boolean(deletingEntryId)}
                     >
                       <X size={20} aria-hidden />
                     </button>
@@ -593,6 +644,7 @@ export function CommentDialog() {
                             editDraft={editingEntryId === entry.id ? editDraft : ''}
                             editError={editingEntryId === entry.id ? editError : null}
                             savingEdit={editingEntryId === entry.id ? savingEdit : false}
+                            deletingEntry={deletingEntryId === entry.id}
                             editTextareaRef={editTextareaRef}
                             onStartEdit={() => {
                               setEditingEntryId(entry.id);
@@ -605,6 +657,7 @@ export function CommentDialog() {
                               setEditDraft('');
                               setEditError(null);
                             }}
+                            onDelete={() => void onDeleteThreadEntry(entry.id)}
                             onSaveEdit={onSaveThreadEdit}
                           />
                         </div>
@@ -650,6 +703,11 @@ export function CommentDialog() {
                     {deleteError}
                   </p>
                 ) : null}
+                {deleteEntryError ? (
+                  <p style={{ color: '#c9190b', fontSize: 13, marginTop: 8 }} role="alert">
+                    {deleteEntryError}
+                  </p>
+                ) : null}
 
                 <div className="exp-lab-actions-detail exp-lab-actions-detail--end">
                   {showDeletePin ? (
@@ -673,7 +731,7 @@ export function CommentDialog() {
                     type="button"
                     className="exp-lab-btn exp-lab-btn--primary"
                     onClick={() => void onPostAppend()}
-                    disabled={!appendText.trim() || savingAppend || deleting || savingEdit}
+                    disabled={!appendText.trim() || savingAppend || deleting || savingEdit || Boolean(deletingEntryId)}
                   >
                     {savingAppend ? 'Posting…' : 'Post feedback'}
                   </button>

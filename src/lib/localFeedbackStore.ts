@@ -85,7 +85,27 @@ export function appendLocalPinEntry(
   saveLocalPins(projectId, list);
 }
 
-/** Update one thread message body; keeps pin-level author fields aligned with latest entry. */
+/** Remove one thread message; syncs `comment_text` and pin-level author to latest remaining poster. */
+export function removeLocalPinEntry(projectId: string, pinId: string, entryId: string): void {
+  const list = loadLocalPins(projectId).map((p) => {
+    if (p.id !== pinId) {
+      return p;
+    }
+    const prev = getPinThreadEntries(p);
+    const next = prev.filter((e) => e.id !== entryId);
+    const last = next[next.length - 1];
+    return {
+      ...p,
+      comment_entries: next,
+      comment_text: threadBodiesJoined(next),
+      author_name: last?.author_name ?? p.author_name,
+      author_avatar_url: last?.author_avatar_url ?? p.author_avatar_url,
+      author_github_id: last?.author_github_id ?? p.author_github_id,
+    };
+  });
+  saveLocalPins(projectId, list);
+}
+
 export function updateLocalPinEntry(
   projectId: string,
   pinId: string,
