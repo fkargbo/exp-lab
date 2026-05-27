@@ -214,23 +214,28 @@ function ensurePinLayerElement(): HTMLElement | null {
   return el;
 }
 
+/** Content pins on body (above interaction layer), scroll-synced to the annotation root. */
 function syncPinLayerToAnnotationRoot(root: HTMLElement = resolveScrollableAnnotationRoot()): void {
   const el = ensurePinLayerElement();
   if (!el) {
     return;
   }
 
-  if (el.parentElement !== root) {
-    root.appendChild(el);
+  if (el.parentElement !== document.body) {
+    document.body.appendChild(el);
   }
 
+  const rect = root.getBoundingClientRect();
   const { width, height } = getAnnotationContentSize(root);
   Object.assign(el.style, {
-    position: 'absolute',
-    left: '0',
-    top: '0',
+    position: 'fixed',
+    left: `${rect.left}px`,
+    top: `${rect.top}px`,
     width: `${width}px`,
     height: `${height}px`,
+    transform: `translate3d(${-root.scrollLeft}px, ${-root.scrollTop}px, 0)`,
+    pointerEvents: 'none',
+    zIndex: '2147483646',
     boxSizing: 'border-box',
     overflow: 'visible',
   });

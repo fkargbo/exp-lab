@@ -580,6 +580,10 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       if (!feedbackMode || e.button !== 0) {
         return;
       }
+      const target = e.target as Element | null;
+      if (target?.closest?.('.exp-lab-pin-label, .exp-lab-dialog-backdrop, .exp-lab-ui')) {
+        return;
+      }
       const root = resolveScrollableAnnotationRoot();
       const { x, y } = pointerToRootLocal(e.clientX, e.clientY, root);
       dragRef.current = {

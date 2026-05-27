@@ -16,13 +16,14 @@ export function InteractionLayer() {
     }
   }, [feedbackMode, syncPinLayerHeight]);
 
+  const placing = feedbackMode && !pendingPin && !selectedPin;
+
   /* Cursor over page chrome while placing pins; clear while dialog is open so inputs use I‑beam. */
   useEffect(() => {
     if (typeof document === 'undefined') {
       return;
     }
     const prev = document.body.style.cursor;
-    const placing = feedbackMode && !pendingPin && !selectedPin;
     setPinLayerPlacementMode(placing);
     if (placing) {
       document.body.style.cursor = EXP_LAB_COMMENT_CURSOR;
@@ -36,7 +37,7 @@ export function InteractionLayer() {
   }, [feedbackMode, pendingPin, selectedPin]);
 
   const style = useMemo((): React.CSSProperties => {
-    if (!feedbackMode) {
+    if (!feedbackMode || !placing) {
       return { pointerEvents: 'none', cursor: 'default', touchAction: 'auto' as const };
     }
     return {
@@ -44,7 +45,7 @@ export function InteractionLayer() {
       cursor: EXP_LAB_COMMENT_CURSOR,
       touchAction: 'none' as const,
     };
-  }, [feedbackMode]);
+  }, [feedbackMode, placing]);
 
   const dragMarqueeStyle = useMemo((): React.CSSProperties | null => {
     if (!dragRect || !feedbackMode) {
