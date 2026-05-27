@@ -63,18 +63,18 @@ function pageSignatureFromPathname(pathname: string, search: string, hash: strin
   return `${normalizePathOnly(stripBasenameFromPathname(pathname))}${search}${hash}`;
 }
 
-function scopeSignatureFromProjectId(projectId: string): string {
+function scopeSignatureFromProjectId(projectId: string): string | null {
   if (projectId.startsWith('http://') || projectId.startsWith('https://')) {
     try {
       const u = new URL(projectId);
       return pageSignatureFromPathname(u.pathname, u.search, u.hash);
     } catch {
-      return projectId;
+      return null;
     }
   }
   const slash = projectId.indexOf('/');
   if (slash < 0) {
-    return projectId;
+    return null;
   }
   const rest = projectId.slice(slash);
   const q = rest.indexOf('?');
@@ -114,62 +114,81 @@ export function getProjectId(): string {
   return getPageScopeProjectIds()[0]!;
 }
 
-/** Whether a pin belongs on the page currently shown in the browser. */
-export function pinMatchesPageScope(pin: FeedbackPinRecord): boolean {
-  const currentSig = getPageScopeSignature();
-  if (getPageScopeProjectIds().includes(pin.project_id)) {
-    return true;
-  }
-  if (scopeSignatureFromProjectId(pin.project_id) === currentSig) {
-    return true;
+/** Derive the page scope recorded on a pin (explicit field, URL, or legacy project_id). */
+export function pinPageScopeKey(pin: FeedbackPinRecord): string | null {
+  if (pin.page_scope?.trim()) {
+    return pin.page_scope.trim();
   }
   if (pin.prototype_url) {
     try {
       const u = new URL(pin.prototype_url, window.location.origin);
-      return pageSignatureFromPathname(u.pathname, u.search, u.hash) === currentSig;
+      return pageSignatureFromPathname(u.pathname, u.search, u.hash);
     } catch {
-      return false;
+      /* fall through */
     }
   }
-  return false;
+  if (pin.project_id) {
+    return scopeSignatureFromProjectId(pin.project_id);
+  }
+  return null;
+}
+
+/** Whether a pin belongs on the page currently shown in the browser. */
+export function pinMatchesPageScope(pin: FeedbackPinRecord): boolean {
+  const current = getPageScopeSignature();
+  const pinScope = pinPageScopeKey(pin);
+  if (pinScope) {
+    return pinScope === current;
+  }
+  return getPageScopeProjectIds().includes(pin.project_id);
 }
 
 /**
- * Subscribe to SPA navigations so `getProjectId()` can be re-read after client-side route changes
- * (History API does not fire `popstate` on pushState/replaceState).
+ * Subscribe to SPA navigations so `getProjectId()` can be re-read after client-side route changes.
+ * Uses History API hooks plus a short poll (React Router lives outside the embed tree).
  */
 export function subscribeToLocationScope(callback: () => void): () => void {
-  const notify = () => {
+  let lastSig = getPageScopeSignature();
+
+  const emitIfChanged = () => {
+    const sig = getPageScopeSignature();
+    if (sig === lastSig) {
+      return;
+    }
+    lastSig = sig;
     queueMicrotask(callback);
   };
 
-  window.addEventListener('popstate', notify);
-  window.addEventListener('hashchange', notify);
+  window.addEventListener('popstate', emitIfChanged);
+  window.addEventListener('hashchange', emitIfChanged);
 
   const origPush = history.pushState.bind(history);
   const origReplace = history.replaceState.bind(history);
 
   history.pushState = (...args: Parameters<History['pushState']>) => {
     const r = origPush(...args);
-    notify();
+    emitIfChanged();
     return r;
   };
   history.replaceState = (...args: Parameters<History['replaceState']>) => {
     const r = origReplace(...args);
-    notify();
+    emitIfChanged();
     return r;
   };
 
+  const intervalId = window.setInterval(emitIfChanged, 200);
+
   return () => {
-    window.removeEventListener('popstate', notify);
-    window.removeEventListener('hashchange', notify);
+    window.removeEventListener('popstate', emitIfChanged);
+    window.removeEventListener('hashchange', emitIfChanged);
     history.pushState = origPush;
     history.replaceState = origReplace;
+    window.clearInterval(intervalId);
   };
 }
 
 export function getCanonicalPrototypeUrl(): string {
-  return `${window.location.origin}${getRouterPathname()}${window.location.search}`;
+  return `${window.location.origin}${getRouterPathname()}${window.location.search}${window.location.hash}`;
 }
 
 /**

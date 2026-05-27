@@ -68,6 +68,9 @@ const DRAG_THRESHOLD_PX = 6;
 const PIN_POLL_INTERVAL_MS = 8_000;
 
 function mergePinIntoList(prev: FeedbackPinRecord[], pin: FeedbackPinRecord): FeedbackPinRecord[] {
+  if (!pinMatchesPageScope(pin)) {
+    return prev;
+  }
   const idx = prev.findIndex((p) => p.id === pin.id);
   if (idx >= 0) {
     const next = [...prev];
@@ -81,6 +84,7 @@ function mergePinIntoList(prev: FeedbackPinRecord[], pin: FeedbackPinRecord): Fe
 
 type PendingPin = PinPlacement & {
   kind: 'point' | 'region';
+  page_scope: string;
 };
 
 function buildPendingPlacement(
@@ -88,6 +92,7 @@ function buildPendingPlacement(
   clientY: number,
   region?: { x_pct: number; y_pct: number; w_pct: number; h_pct: number },
 ): PendingPin {
+  const page_scope = getPageScopeSignature();
   const contentRoot = resolveScrollableAnnotationRoot();
   const inContent = isPointerInContentRoot(clientX, clientY, contentRoot);
   const anchor = captureElementAnchor(clientX, clientY);
@@ -95,6 +100,7 @@ function buildPendingPlacement(
   if (region) {
     return {
       kind: 'region',
+      page_scope,
       coordinate_space: inContent ? 'content' : 'viewport',
       x_pct: region.x_pct,
       y_pct: region.y_pct,
@@ -107,6 +113,7 @@ function buildPendingPlacement(
   if (inContent) {
     return {
       kind: 'point',
+      page_scope,
       coordinate_space: 'content',
       ...pointerToPercent(clientX, clientY, contentRoot),
       ...anchor,
@@ -115,6 +122,7 @@ function buildPendingPlacement(
 
   return {
     kind: 'point',
+    page_scope,
     coordinate_space: 'viewport',
     ...pointerToViewportPercent(clientX, clientY),
     ...anchor,
@@ -981,6 +989,11 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       if (!pendingPin) {
         return;
       }
+      const pageScope = getPageScopeSignature();
+      if (pendingPin.page_scope !== pageScope) {
+        throw new Error('You navigated to another page. Place your pin again on this page.');
+      }
+      const scopeProjectId = getProjectId();
       const author = authorFromUser(user);
       let author_name: string | null = author?.name ?? null;
       let author_avatar_url: string | null = author?.avatarUrl ?? null;
@@ -1004,8 +1017,9 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       });
 
       const base = {
-        project_id: projectIdRef.current,
+        project_id: scopeProjectId,
         prototype_url: getCanonicalPrototypeUrl(),
+        page_scope: pageScope,
         comment_text: entry.body,
         comment_entries: [entry],
         author_name,
@@ -1049,8 +1063,8 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
         };
         appendLocalPin(record);
         setPendingPin(null);
-        setReadPinIds(markPinsRead(projectIdRef.current, [record.id]));
-        setPins(loadLocalPins(projectIdRef.current));
+        setReadPinIds(markPinsRead(scopeProjectId, [record.id]));
+        setPins(loadLocalPins(scopeProjectId).filter(pinMatchesPageScope));
         return;
       }
 
@@ -1058,8 +1072,14 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       let { data: inserted, error } = await supabase.from('feedback_pins').insert(row).select().single();
       if (error && /column|schema|unknown/i.test(error.message)) {
         insertedPlacementStripped = true;
-        const { coordinate_space: _cs, anchor_selector: _as, anchor_x_pct: _ax, anchor_y_pct: _ay, ...legacyRow } =
-          row as typeof row & Record<string, unknown>;
+        const {
+          coordinate_space: _cs,
+          anchor_selector: _as,
+          anchor_x_pct: _ax,
+          anchor_y_pct: _ay,
+          page_scope: _ps,
+          ...legacyRow
+        } = row as typeof row & Record<string, unknown>;
         ({ data: inserted, error } = await supabase.from('feedback_pins').insert(legacyRow).select().single());
       }
       if (error) {
@@ -1071,15 +1091,16 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
           anchor_selector: pendingPin.anchor_selector ?? null,
           anchor_x_pct: pendingPin.anchor_x_pct ?? null,
           anchor_y_pct: pendingPin.anchor_y_pct ?? null,
+          page_scope: pageScope,
         });
       }
       setPendingPin(null);
       if (inserted?.id) {
-        setReadPinIds(markPinsRead(projectIdRef.current, [inserted.id]));
+        setReadPinIds(markPinsRead(scopeProjectId, [inserted.id]));
       }
       void loadPins();
     },
-    [pendingPin, supabase, user, guestName, projectId, setGuestName, loadPins],
+    [pendingPin, supabase, user, guestName, setGuestName, loadPins],
   );
 
   const value = {

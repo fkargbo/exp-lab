@@ -6,7 +6,9 @@ const STORAGE_KEY = 'exp-lab-pin-placement-overlays';
 type PlacementOverlay = Pick<
   PinPlacement,
   'coordinate_space' | 'anchor_selector' | 'anchor_x_pct' | 'anchor_y_pct'
->;
+> & {
+  page_scope?: string;
+};
 
 function readAll(): Record<string, PlacementOverlay> {
   try {
@@ -41,6 +43,11 @@ export function mergePlacementOverlays(pins: FeedbackPinRecord[]): FeedbackPinRe
     if (!overlay) {
       return pin;
     }
-    return { ...pin, ...overlay };
+    const { page_scope, ...placement } = overlay;
+    return {
+      ...pin,
+      ...placement,
+      ...(page_scope ? { page_scope } : {}),
+    };
   });
 }

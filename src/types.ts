@@ -44,6 +44,8 @@ export type FeedbackPinRecord = {
   /** When present and non-empty, authoritative thread; otherwise derive from `comment_text` + pin author. */
   comment_entries?: FeedbackThreadEntry[] | null;
   prototype_url: string | null;
+  /** Router path + query + hash where the pin was placed (`getPageScopeSignature()`). */
+  page_scope?: string | null;
   /** Original pin author; also updated to latest poster for simple consumers (e.g. map tint). */
   author_name: string | null;
   author_avatar_url: string | null;

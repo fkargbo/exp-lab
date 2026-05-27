@@ -1,5 +1,9 @@
 import type { FeedbackPinRecord } from '../types';
-import { getAnnotationContentSize, resolveScrollableAnnotationRoot } from './annotationSurface';
+import {
+  expandMarkedAnnotationRoot,
+  getAnnotationContentSize,
+  resolveScrollableAnnotationRoot,
+} from './annotationSurface';
 import { pinMatchesPageScope } from './projectId';
 
 const EXP_LAB_LAYER_IDS = new Set([
@@ -199,12 +203,19 @@ function resolveAnchoredDisplay(pin: FeedbackPinRecord, root: HTMLElement): PinD
     return null;
   }
 
+  const space: PinCoordinateSpace = pin.coordinate_space ?? 'content';
+  const marked = document.querySelector<HTMLElement>('[data-exp-lab-annotation-root]');
+  if (marked) {
+    const pageRoot = expandMarkedAnnotationRoot(marked);
+    if (space === 'content' && !pageRoot.contains(el)) {
+      return null;
+    }
+  }
+
   const elRect = el.getBoundingClientRect();
   if (elRect.width < 1 || elRect.height < 1) {
     return null;
   }
-
-  const space: PinCoordinateSpace = pin.coordinate_space ?? 'content';
   const useViewport = space === 'viewport' || !root.contains(el);
   const offsetX = (pin.anchor_x_pct / 100) * elRect.width;
   const offsetY = (pin.anchor_y_pct / 100) * elRect.height;
