@@ -31,6 +31,7 @@ import {
   canUserEditThreadEntry,
   createThreadEntry,
   getPinThreadEntries,
+  resolvePinForThread,
   threadBodiesJoined,
 } from '../lib/pinThread';
 import { canSignedInUserDeletePin, isPinAuthoredByCurrentUser } from '../lib/currentAuthor';
@@ -738,7 +739,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       if (!trimmed) {
         throw new Error('Enter a comment.');
       }
-      const pin = pins.find((p) => p.id === pinId) ?? (selectedPin?.id === pinId ? selectedPin : undefined);
+      const pin = resolvePinForThread(pinId, selectedPin, pins);
       if (!pin) {
         throw new Error('Pin not found.');
       }
@@ -813,8 +814,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       if (!trimmed) {
         throw new Error('Enter a comment.');
       }
-      const pin =
-        pins.find((p) => p.id === pinId) ?? (selectedPin?.id === pinId ? selectedPin : undefined);
+      const pin = resolvePinForThread(pinId, selectedPin, pins);
       if (!pin) {
         throw new Error('Pin not found.');
       }
@@ -875,8 +875,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
 
   const deletePinThreadEntry = useCallback(
     async (pinId: string, entryId: string) => {
-      const pin =
-        pins.find((p) => p.id === pinId) ?? (selectedPin?.id === pinId ? selectedPin : undefined);
+      const pin = resolvePinForThread(pinId, selectedPin, pins);
       if (!pin) {
         throw new Error('Pin not found.');
       }

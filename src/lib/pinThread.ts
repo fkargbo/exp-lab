@@ -43,6 +43,18 @@ export function getPinThreadEntries(pin: FeedbackPinRecord): FeedbackThreadEntry
   return [];
 }
 
+/** Prefer the open dialog pin so thread ids match what the user sees. */
+export function resolvePinForThread(
+  pinId: string,
+  selectedPin: FeedbackPinRecord | null | undefined,
+  pins: FeedbackPinRecord[],
+): FeedbackPinRecord | undefined {
+  if (selectedPin?.id === pinId) {
+    return selectedPin;
+  }
+  return pins.find((p) => p.id === pinId);
+}
+
 export function threadBodiesJoined(entries: FeedbackThreadEntry[]): string {
   return entries
     .map((e) => e.body.trim())
