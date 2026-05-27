@@ -12,7 +12,10 @@ import React, {
 import type { AuthorInfo, FeedbackPinKind, FeedbackPinRecord } from '../types';
 import {
   getCanonicalPrototypeUrl,
+  getPageScopeProjectIds,
+  getPageScopeSignature,
   getProjectId,
+  pinMatchesPageScope,
   subscribeToLocationScope,
 } from '../lib/projectId';
 import { pinActivitySnapshot } from '../lib/pinSync';
@@ -277,7 +280,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
 
   const notifyIncomingPin = useCallback(
     (pin: FeedbackPinRecord) => {
-      if (pin.project_id !== projectIdRef.current) {
+      if (!pinMatchesPageScope(pin)) {
         return;
       }
       if (isPinAuthoredByCurrentUser(pin, userRef.current, guestNameRef.current)) {
@@ -298,7 +301,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
 
   const applyRemotePinChange = useCallback(
     (pin: FeedbackPinRecord) => {
-      if (pin.project_id !== projectIdRef.current) {
+      if (!pinMatchesPageScope(pin)) {
         return;
       }
       setPins((prev) => mergePinIntoList(prev, pin));
@@ -335,12 +338,9 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
 
   const applyPinsFromServer = useCallback(
     (data: FeedbackPinRecord[]) => {
-      const scope = projectIdRef.current;
-      const scoped = data.filter((p) => p.project_id === scope);
+      const scoped = data.filter(pinMatchesPageScope);
       const prevSnap = new Map(
-        pinsRef.current
-          .filter((p) => p.project_id === scope)
-          .map((p) => [p.id, pinActivitySnapshot(p)] as const),
+        pinsRef.current.filter(pinMatchesPageScope).map((p) => [p.id, pinActivitySnapshot(p)] as const),
       );
 
       for (const pin of scoped) {
@@ -360,10 +360,22 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
   );
 
   const loadPins = useCallback(async (options?: { silent?: boolean }) => {
-    const scope = projectIdRef.current;
+    const scopeKeys = getPageScopeProjectIds();
+    const loadScopeSignature = getPageScopeSignature();
 
     if (!supabase) {
-      setPins(mergePlacementOverlays(loadLocalPins(scope)));
+      const seen = new Set<string>();
+      const merged: FeedbackPinRecord[] = [];
+      for (const key of scopeKeys) {
+        for (const pin of loadLocalPins(key)) {
+          if (seen.has(pin.id) || !pinMatchesPageScope(pin)) {
+            continue;
+          }
+          seen.add(pin.id);
+          merged.push(pin);
+        }
+      }
+      setPins(mergePlacementOverlays(merged));
       setLoadingPins(false);
       return;
     }
@@ -374,10 +386,10 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     const { data, error } = await supabase
       .from('feedback_pins')
       .select('*')
-      .eq('project_id', scope)
+      .in('project_id', scopeKeys)
       .order('created_at', { ascending: true });
 
-    if (projectIdRef.current !== scope) {
+    if (getPageScopeSignature() !== loadScopeSignature) {
       return;
     }
 
@@ -391,7 +403,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       }
       return;
     }
-    applyPinsFromServer((data ?? []) as FeedbackPinRecord[]);
+    applyPinsFromServer(((data ?? []) as FeedbackPinRecord[]).filter(pinMatchesPageScope));
   }, [supabase, applyPinsFromServer]);
 
   useEffect(() => {
@@ -428,7 +440,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
         },
         (payload) => {
           const row = (payload.new ?? payload.old) as FeedbackPinRecord | undefined;
-          if (!row || row.project_id !== scope) {
+          if (!row || !pinMatchesPageScope(row)) {
             return;
           }
           if (payload.eventType === 'DELETE') {
@@ -483,18 +495,30 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     if (supabase) {
       return;
     }
-    const key = getLocalFeedbackStorageKey(projectId);
+    const scopeKeys = getPageScopeProjectIds();
+    const storageKeys = new Set(scopeKeys.map((k) => getLocalFeedbackStorageKey(k)));
     const onStorage = (e: StorageEvent) => {
-      if (e.key === key) {
-        const prevIds = new Set(pinsRef.current.map((p) => p.id));
-        const next = loadLocalPins(projectId);
-        for (const pin of next) {
-          if (!prevIds.has(pin.id)) {
-            notifyIncomingPin(pin);
-          }
-        }
-        setPins(next);
+      if (!e.key || !storageKeys.has(e.key)) {
+        return;
       }
+      const prevIds = new Set(pinsRef.current.map((p) => p.id));
+      const seen = new Set<string>();
+      const next: FeedbackPinRecord[] = [];
+      for (const key of scopeKeys) {
+        for (const pin of loadLocalPins(key)) {
+          if (seen.has(pin.id) || !pinMatchesPageScope(pin)) {
+            continue;
+          }
+          seen.add(pin.id);
+          next.push(pin);
+        }
+      }
+      for (const pin of next) {
+        if (!prevIds.has(pin.id)) {
+          notifyIncomingPin(pin);
+        }
+      }
+      setPins(next);
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);

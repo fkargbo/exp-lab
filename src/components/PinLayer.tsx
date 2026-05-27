@@ -4,6 +4,7 @@ import type { FeedbackPinRecord } from '../types';
 import { useExpLab } from '../context/ExpLabContext';
 import { getPinChrome } from '../lib/authorPinColor';
 import { pinUsesChromeLayer, resolvePinMarkerLayout } from '../lib/pinAnchor';
+import { pinMatchesPageScope } from '../lib/projectId';
 import { getPinMarkerAuthor } from '../lib/pinThread';
 
 function initials(name: string | null): string {
@@ -33,6 +34,10 @@ function PinMarker({ pin, onOpen }: { pin: FeedbackPinRecord; onOpen: (p: Feedba
   const layout = useMemo(() => resolvePinMarkerLayout(pin), [pin, layoutTick]);
   const chrome = getPinChrome(pin);
   const markerAuthor = getPinMarkerAuthor(pin);
+
+  if (!layout) {
+    return null;
+  }
 
   const markerStyle: React.CSSProperties = {
     position: layout.position,
@@ -110,7 +115,7 @@ export function PinLayer() {
   const { contentPins, chromePins } = useMemo(() => {
     const content: FeedbackPinRecord[] = [];
     const chrome: FeedbackPinRecord[] = [];
-    for (const pin of pins) {
+    for (const pin of pins.filter(pinMatchesPageScope)) {
       if (pinUsesChromeLayer(pin)) {
         chrome.push(pin);
       } else {

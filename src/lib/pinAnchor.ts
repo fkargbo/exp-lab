@@ -1,5 +1,6 @@
 import type { FeedbackPinRecord } from '../types';
 import { getAnnotationContentSize, resolveScrollableAnnotationRoot } from './annotationSurface';
+import { pinMatchesPageScope } from './projectId';
 
 const EXP_LAB_LAYER_IDS = new Set([
   'exp-lab-feedback-host',
@@ -162,7 +163,10 @@ export function pinUsesChromeLayer(pin: FeedbackPinRecord): boolean {
 export function resolvePinMarkerLayout(
   pin: FeedbackPinRecord,
   root: HTMLElement = resolveScrollableAnnotationRoot(),
-): PinDisplayLayout {
+): PinDisplayLayout | null {
+  if (!pinMatchesPageScope(pin)) {
+    return null;
+  }
   const space: PinCoordinateSpace = pin.coordinate_space ?? 'content';
 
   if (pin.anchor_selector && pin.anchor_x_pct != null && pin.anchor_y_pct != null) {
