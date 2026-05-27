@@ -43,6 +43,24 @@ export function getPinThreadEntries(pin: FeedbackPinRecord): FeedbackThreadEntry
   return [];
 }
 
+/** Original pin poster (first thread message), not the latest replier on `pin.author_*`. */
+export function getPinCreatorAuthor(pin: FeedbackPinRecord): PinEntryAuthor {
+  const entries = getPinThreadEntries(pin);
+  const first = entries[0];
+  if (first) {
+    return {
+      name: first.author_name,
+      avatarUrl: first.author_avatar_url,
+      githubId: first.author_github_id,
+    };
+  }
+  return {
+    name: pin.author_name,
+    avatarUrl: pin.author_avatar_url,
+    githubId: pin.author_github_id,
+  };
+}
+
 /** Prefer the open dialog pin so thread ids match what the user sees. */
 export function resolvePinForThread(
   pinId: string,

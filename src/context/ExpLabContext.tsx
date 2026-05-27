@@ -700,9 +700,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
   const deletePin = useCallback(
     async (pinId: string) => {
       const scope = projectIdRef.current;
-      const pin =
-        pinsRef.current.find((p) => p.id === pinId) ??
-        (selectedPin?.id === pinId ? selectedPin : undefined);
+      const pin = resolvePinForThread(pinId, selectedPin, pinsRef.current);
       if (!pin) {
         throw new Error('Pin not found.');
       }
@@ -891,12 +889,30 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       }
 
       const merged = entries.filter((e) => e.id !== entryId);
-      const cleared = merged.length === 0;
-      const joined = cleared ? '' : threadBodiesJoined(merged);
+      if (merged.length === 0) {
+        if (!supabase) {
+          removeLocalPin(projectId, pinId);
+          setPins(loadLocalPins(projectId));
+          setSelectedPin(null);
+          return;
+        }
+        if (!user) {
+          throw new Error('Sign in with GitHub to delete your feedback.');
+        }
+        const { error: deleteError } = await supabase.from('feedback_pins').delete().eq('id', pinId);
+        if (deleteError) {
+          throw new Error(deleteError.message);
+        }
+        setSelectedPin(null);
+        void loadPins();
+        return;
+      }
+
+      const joined = threadBodiesJoined(merged);
       const last = merged[merged.length - 1];
       const updatedPin: FeedbackPinRecord = {
         ...pin,
-        comment_entries: cleared ? [] : merged,
+        comment_entries: merged,
         comment_text: joined,
         author_name: last?.author_name ?? pin.author_name,
         author_avatar_url: last?.author_avatar_url ?? pin.author_avatar_url,
@@ -919,7 +935,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       const { error } = await supabase
         .from('feedback_pins')
         .update({
-          comment_entries: cleared ? [] : merged,
+          comment_entries: merged,
           comment_text: joined,
           author_name: last?.author_name ?? pin.author_name,
           author_avatar_url: last?.author_avatar_url ?? pin.author_avatar_url,

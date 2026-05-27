@@ -1,5 +1,6 @@
 import type { User } from '@supabase/supabase-js';
 import type { FeedbackPinRecord } from '../types';
+import { getPinCreatorAuthor } from './pinThread';
 import { getStoredGuestName } from './storage';
 
 /** True when this pin was created by the current signed-in or guest identity. */
@@ -8,10 +9,12 @@ export function isPinAuthoredByCurrentUser(
   user: User | null,
   guestName: string | null,
 ): boolean {
+  const creator = getPinCreatorAuthor(pin);
+
   if (user) {
     const meta = user.user_metadata as Record<string, string | undefined>;
     const githubId = meta.user_name ?? meta.preferred_username ?? null;
-    if (githubId && pin.author_github_id && pin.author_github_id === githubId) {
+    if (githubId && creator.githubId && creator.githubId === githubId) {
       return true;
     }
     const displayName =
@@ -21,27 +24,28 @@ export function isPinAuthoredByCurrentUser(
       meta.preferred_username ||
       user.email?.split('@')[0] ||
       null;
-    if (displayName && pin.author_name?.trim() === displayName.trim()) {
+    if (displayName && creator.name?.trim() === displayName.trim()) {
       return true;
     }
   }
 
   const guest = guestName?.trim() || getStoredGuestName()?.trim();
-  if (guest && pin.author_name?.trim() === guest && !pin.author_github_id) {
+  if (guest && creator.name?.trim() === guest && !creator.githubId) {
     return true;
   }
 
   return false;
 }
 
-/** Delete requires a signed-in session that matches the pin author. */
+/** Delete requires a signed-in session that matches the pin creator. */
 export function canSignedInUserDeletePin(pin: FeedbackPinRecord, user: User | null): boolean {
   if (!user) {
     return false;
   }
+  const creator = getPinCreatorAuthor(pin);
   const meta = user.user_metadata as Record<string, string | undefined>;
   const githubId = meta.user_name ?? meta.preferred_username ?? null;
-  if (githubId && pin.author_github_id && pin.author_github_id === githubId) {
+  if (githubId && creator.githubId && creator.githubId === githubId) {
     return true;
   }
   const displayName =
@@ -51,7 +55,7 @@ export function canSignedInUserDeletePin(pin: FeedbackPinRecord, user: User | nu
     meta.preferred_username ||
     user.email?.split('@')[0] ||
     null;
-  if (displayName && pin.author_name?.trim() === displayName.trim()) {
+  if (displayName && creator.name?.trim() === displayName.trim()) {
     return true;
   }
   return false;

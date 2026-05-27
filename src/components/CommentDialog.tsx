@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { createPortal } from 'react-dom';
 import { useExpLab } from '../context/ExpLabContext';
 import { getStoredGuestName, resolveGuestDisplayName } from '../lib/storage';
+import { isPinAuthoredByCurrentUser } from '../lib/currentAuthor';
 import { canUserDeleteThreadEntry, canUserEditThreadEntry, getPinThreadEntries } from '../lib/pinThread';
 import type { AuthorInfo, FeedbackThreadEntry } from '../types';
 
@@ -244,6 +245,7 @@ export function CommentDialog() {
     selectedPin,
     closePinDetail,
     leaveFeedbackMode,
+    deletePin,
     appendPinFeedback,
     updatePinThreadEntry,
     deletePinThreadEntry,
@@ -265,6 +267,8 @@ export function CommentDialog() {
   const [editError, setEditError] = useState<string | null>(null);
   const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null);
   const [deleteEntryError, setDeleteEntryError] = useState<string | null>(null);
+  const [deletingPin, setDeletingPin] = useState(false);
+  const [deletePinError, setDeletePinError] = useState<string | null>(null);
 
   const pendingCommentRef = useRef<HTMLTextAreaElement>(null);
   const appendTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -304,6 +308,8 @@ export function CommentDialog() {
     setEditError(null);
     setDeleteEntryError(null);
     setDeletingEntryId(null);
+    setDeletePinError(null);
+    setDeletingPin(false);
   }, [selectedPin?.id]);
 
   useLayoutEffect(() => {
@@ -338,7 +344,31 @@ export function CommentDialog() {
   const detail = selectedPin;
   const threadEntries = detail ? getPinThreadEntries(detail) : [];
   const guestIdentity = (guestName ?? getStoredGuestName() ?? '').trim() || null;
-  const threadBusy = savingAppend || savingEdit || Boolean(deletingEntryId);
+  const threadBusy = savingAppend || savingEdit || Boolean(deletingEntryId) || deletingPin;
+  const showDeletePin = detail ? isPinAuthoredByCurrentUser(detail, user, guestName) : false;
+  const deletePinRequiresSignIn = showDeletePin && persistenceMode === 'supabase' && !user;
+  const deletePinDisabled = deletePinRequiresSignIn || threadBusy;
+  const deletePinHint = deletePinRequiresSignIn
+    ? 'Sign in with GitHub to delete your feedback.'
+    : undefined;
+
+  const onDeletePin = async () => {
+    if (!detail) {
+      return;
+    }
+    if (!window.confirm('Delete this pin and all feedback on it? This cannot be undone.')) {
+      return;
+    }
+    setDeletingPin(true);
+    setDeletePinError(null);
+    try {
+      await deletePin(detail.id);
+    } catch (e) {
+      setDeletePinError(e instanceof Error ? e.message : 'Could not delete feedback.');
+    } finally {
+      setDeletingPin(false);
+    }
+  };
 
   const onPostAppend = async () => {
     if (!detail) {
@@ -710,8 +740,30 @@ export function CommentDialog() {
                     {deleteEntryError}
                   </p>
                 ) : null}
+                {deletePinError ? (
+                  <p style={{ color: '#c9190b', fontSize: 13, marginTop: 8 }} role="alert">
+                    {deletePinError}
+                  </p>
+                ) : null}
 
                 <div className="exp-lab-actions-detail exp-lab-actions-detail--end">
+                  {showDeletePin ? (
+                    <span className="exp-lab-delete-pin-wrap" title={deletePinHint}>
+                      <button
+                        type="button"
+                        className="exp-lab-btn exp-lab-btn--danger"
+                        onClick={() => void onDeletePin()}
+                        disabled={deletePinDisabled}
+                        aria-label={
+                          deletePinRequiresSignIn
+                            ? 'Delete pin (sign in with GitHub required)'
+                            : 'Delete pin'
+                        }
+                      >
+                        {deletingPin ? 'Deleting…' : 'Delete pin'}
+                      </button>
+                    </span>
+                  ) : null}
                   <button
                     type="button"
                     className="exp-lab-btn exp-lab-btn--primary"
