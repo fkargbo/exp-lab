@@ -12,8 +12,7 @@ import React, {
 import type { AuthorInfo, FeedbackPinKind, FeedbackPinRecord } from '../types';
 import {
   getCanonicalPrototypeUrl,
-  getPageScopeProjectIds,
-  getPageScopeSignature,
+  getPageScope,
   getProjectId,
   pinMatchesPageScope,
   subscribeToLocationScope,
@@ -92,7 +91,7 @@ function buildPendingPlacement(
   clientY: number,
   region?: { x_pct: number; y_pct: number; w_pct: number; h_pct: number },
 ): PendingPin {
-  const page_scope = getPageScopeSignature();
+  const page_scope = getPageScope();
   const contentRoot = resolveScrollableAnnotationRoot();
   const inContent = isPointerInContentRoot(clientX, clientY, contentRoot);
   const anchor = captureElementAnchor(clientX, clientY);
@@ -368,22 +367,11 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
   );
 
   const loadPins = useCallback(async (options?: { silent?: boolean }) => {
-    const scopeKeys = getPageScopeProjectIds();
-    const loadScopeSignature = getPageScopeSignature();
+    const scope = projectIdRef.current;
+    const pageScope = getPageScope();
 
     if (!supabase) {
-      const seen = new Set<string>();
-      const merged: FeedbackPinRecord[] = [];
-      for (const key of scopeKeys) {
-        for (const pin of loadLocalPins(key)) {
-          if (seen.has(pin.id) || !pinMatchesPageScope(pin)) {
-            continue;
-          }
-          seen.add(pin.id);
-          merged.push(pin);
-        }
-      }
-      setPins(mergePlacementOverlays(merged));
+      setPins(mergePlacementOverlays(loadLocalPins(scope)).filter(pinMatchesPageScope));
       setLoadingPins(false);
       return;
     }
@@ -394,10 +382,11 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     const { data, error } = await supabase
       .from('feedback_pins')
       .select('*')
-      .in('project_id', scopeKeys)
+      .eq('project_id', scope)
       .order('created_at', { ascending: true });
 
-    if (getPageScopeSignature() !== loadScopeSignature) {
+    // Discard results if the user navigated while the request was in flight.
+    if (getPageScope() !== pageScope) {
       return;
     }
 
@@ -503,24 +492,13 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     if (supabase) {
       return;
     }
-    const scopeKeys = getPageScopeProjectIds();
-    const storageKeys = new Set(scopeKeys.map((k) => getLocalFeedbackStorageKey(k)));
+    const storageKey = getLocalFeedbackStorageKey(projectId);
     const onStorage = (e: StorageEvent) => {
-      if (!e.key || !storageKeys.has(e.key)) {
+      if (e.key !== storageKey) {
         return;
       }
       const prevIds = new Set(pinsRef.current.map((p) => p.id));
-      const seen = new Set<string>();
-      const next: FeedbackPinRecord[] = [];
-      for (const key of scopeKeys) {
-        for (const pin of loadLocalPins(key)) {
-          if (seen.has(pin.id) || !pinMatchesPageScope(pin)) {
-            continue;
-          }
-          seen.add(pin.id);
-          next.push(pin);
-        }
-      }
+      const next = mergePlacementOverlays(loadLocalPins(projectId)).filter(pinMatchesPageScope);
       for (const pin of next) {
         if (!prevIds.has(pin.id)) {
           notifyIncomingPin(pin);
@@ -989,7 +967,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       if (!pendingPin) {
         return;
       }
-      const pageScope = getPageScopeSignature();
+      const pageScope = getPageScope();
       if (pendingPin.page_scope !== pageScope) {
         throw new Error('You navigated to another page. Place your pin again on this page.');
       }
@@ -1085,7 +1063,9 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       if (error) {
         throw new Error(error.message);
       }
-      if (inserted?.id && insertedPlacementStripped) {
+      // Always persist the overlay so page_scope is available even when the DB column
+      // doesn't exist (legacy schema) or the column was stripped during insert retry.
+      if (inserted?.id) {
         savePinPlacementOverlay(inserted.id, {
           coordinate_space: pendingPin.coordinate_space,
           anchor_selector: pendingPin.anchor_selector ?? null,
