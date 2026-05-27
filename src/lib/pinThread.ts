@@ -18,7 +18,10 @@ function isThreadEntry(x: unknown): x is FeedbackThreadEntry {
 /** Ordered thread for a pin (legacy `comment_text` + pin author becomes one synthetic entry when needed). */
 export function getPinThreadEntries(pin: FeedbackPinRecord): FeedbackThreadEntry[] {
   const raw = pin.comment_entries;
-  if (Array.isArray(raw) && raw.length > 0) {
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) {
+      return [];
+    }
     const list = raw.filter(isThreadEntry);
     return [...list].sort(
       (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),

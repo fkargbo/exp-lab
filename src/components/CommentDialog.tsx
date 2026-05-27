@@ -1,11 +1,10 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { Github, MoreVertical, X } from 'lucide-react';
 import type { MouseEvent } from 'react';
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useExpLab } from '../context/ExpLabContext';
 import { getStoredGuestName, resolveGuestDisplayName } from '../lib/storage';
-import { isPinAuthoredByCurrentUser } from '../lib/currentAuthor';
 import { canUserDeleteThreadEntry, canUserEditThreadEntry, getPinThreadEntries } from '../lib/pinThread';
 import type { AuthorInfo, FeedbackThreadEntry } from '../types';
 
@@ -20,6 +19,9 @@ function initials(name: string | null): string {
   return name.slice(0, 2).toUpperCase();
 }
 
+const OVERFLOW_PANEL_WIDTH_PX = 128;
+const OVERFLOW_PANEL_HEIGHT_PX = 84;
+
 function ThreadEntryOverflowMenu({
   onEdit,
   onDelete,
@@ -28,60 +30,97 @@ function ThreadEntryOverflowMenu({
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) {
+      return;
+    }
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < OVERFLOW_PANEL_HEIGHT_PX + 12;
+    const left = Math.min(
+      Math.max(8, rect.right - OVERFLOW_PANEL_WIDTH_PX),
+      window.innerWidth - OVERFLOW_PANEL_WIDTH_PX - 8,
+    );
+    setPanelStyle({
+      position: 'fixed',
+      left: `${left}px`,
+      top: openUp
+        ? `${Math.max(8, rect.top - OVERFLOW_PANEL_HEIGHT_PX - 4)}px`
+        : `${rect.bottom + 4}px`,
+      width: `${OVERFLOW_PANEL_WIDTH_PX}px`,
+      zIndex: 2147483648,
+    });
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
     const onDoc = (e: Event) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) {
+        return;
       }
+      setOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
 
-  return (
-    <div className="exp-lab-entry-overflow" ref={wrapRef}>
-      <button
-        type="button"
-        className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--icon exp-lab-entry-overflow__trigger"
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label="Message actions"
-        onClick={() => setOpen((o) => !o)}
+  const panel =
+    open && typeof document !== 'undefined' ? (
+      <div
+        ref={panelRef}
+        className="exp-lab-entry-overflow__panel"
+        role="menu"
+        style={panelStyle}
       >
-        <MoreVertical size={18} aria-hidden />
-      </button>
-      {open ? (
-        <div className="exp-lab-entry-overflow__panel" role="menu">
-          <button
-            type="button"
-            className="exp-lab-entry-overflow__item"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onEdit();
-            }}
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            className="exp-lab-entry-overflow__item exp-lab-entry-overflow__item--danger"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onDelete();
-            }}
-          >
-            Delete
-          </button>
-        </div>
-      ) : null}
-    </div>
+        <button
+          type="button"
+          className="exp-lab-entry-overflow__item"
+          role="menuitem"
+          onClick={() => {
+            setOpen(false);
+            onEdit();
+          }}
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          className="exp-lab-entry-overflow__item exp-lab-entry-overflow__item--danger"
+          role="menuitem"
+          onClick={() => {
+            setOpen(false);
+            onDelete();
+          }}
+        >
+          Delete
+        </button>
+      </div>
+    ) : null;
+
+  return (
+    <>
+      <div className="exp-lab-entry-overflow">
+        <button
+          ref={triggerRef}
+          type="button"
+          className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--icon exp-lab-entry-overflow__trigger"
+          aria-expanded={open}
+          aria-haspopup="menu"
+          aria-label="Message actions"
+          onClick={() => setOpen((o) => !o)}
+        >
+          <MoreVertical size={18} aria-hidden />
+        </button>
+      </div>
+      {panel ? createPortal(panel, document.body) : null}
+    </>
   );
 }
 
@@ -205,7 +244,6 @@ export function CommentDialog() {
     selectedPin,
     closePinDetail,
     leaveFeedbackMode,
-    deletePin,
     appendPinFeedback,
     updatePinThreadEntry,
     deletePinThreadEntry,
@@ -215,8 +253,6 @@ export function CommentDialog() {
   const [nameInput, setNameInput] = useState(guestName ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
 
   const [appendText, setAppendText] = useState('');
@@ -270,11 +306,6 @@ export function CommentDialog() {
     setDeletingEntryId(null);
   }, [selectedPin?.id]);
 
-  useEffect(() => {
-    setDeleteError(null);
-    setDeleting(false);
-  }, [selectedPin?.id]);
-
   useLayoutEffect(() => {
     if (!editingEntryId) {
       return;
@@ -307,31 +338,7 @@ export function CommentDialog() {
   const detail = selectedPin;
   const threadEntries = detail ? getPinThreadEntries(detail) : [];
   const guestIdentity = (guestName ?? getStoredGuestName() ?? '').trim() || null;
-  const showDeletePin = detail ? isPinAuthoredByCurrentUser(detail, user, guestName) : false;
-  const deletePinRequiresSignIn = showDeletePin && !user;
-  const deletePinBusy = deleting || savingAppend || savingEdit || Boolean(deletingEntryId);
-  const deletePinDisabled = deletePinRequiresSignIn || deletePinBusy;
-  const deletePinHint = deletePinRequiresSignIn
-    ? 'Sign in with GitHub to delete your feedback.'
-    : undefined;
-
-  const onDeleteDetail = async () => {
-    if (!detail) {
-      return;
-    }
-    if (!window.confirm('Delete this pin and all feedback on it? This cannot be undone.')) {
-      return;
-    }
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      await deletePin(detail.id);
-    } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : 'Could not delete feedback.');
-    } finally {
-      setDeleting(false);
-    }
-  };
+  const threadBusy = savingAppend || savingEdit || Boolean(deletingEntryId);
 
   const onPostAppend = async () => {
     if (!detail) {
@@ -449,7 +456,7 @@ export function CommentDialog() {
             if (pendingPin && saving) {
               return;
             }
-            if (selectedPin && (savingAppend || deleting || savingEdit || Boolean(deletingEntryId))) {
+            if (selectedPin && threadBusy) {
               return;
             }
             dialogClose();
@@ -587,7 +594,7 @@ export function CommentDialog() {
                       className="exp-lab-btn exp-lab-btn--ghost exp-lab-btn--icon exp-lab-dialog-close"
                       aria-label="Close"
                       onClick={closePinDetail}
-                      disabled={deleting || savingAppend || savingEdit || Boolean(deletingEntryId)}
+                      disabled={threadBusy}
                     >
                       <X size={20} aria-hidden />
                     </button>
@@ -698,11 +705,6 @@ export function CommentDialog() {
                     {appendError}
                   </p>
                 ) : null}
-                {deleteError ? (
-                  <p style={{ color: '#c9190b', fontSize: 13, marginTop: 8 }} role="alert">
-                    {deleteError}
-                  </p>
-                ) : null}
                 {deleteEntryError ? (
                   <p style={{ color: '#c9190b', fontSize: 13, marginTop: 8 }} role="alert">
                     {deleteEntryError}
@@ -710,28 +712,11 @@ export function CommentDialog() {
                 ) : null}
 
                 <div className="exp-lab-actions-detail exp-lab-actions-detail--end">
-                  {showDeletePin ? (
-                    <span className="exp-lab-delete-pin-wrap" title={deletePinHint}>
-                      <button
-                        type="button"
-                        className="exp-lab-btn exp-lab-btn--danger"
-                        onClick={() => void onDeleteDetail()}
-                        disabled={deletePinDisabled}
-                        aria-label={
-                          deletePinRequiresSignIn
-                            ? 'Delete pin (sign in with GitHub required)'
-                            : 'Delete pin'
-                        }
-                      >
-                        {deleting ? 'Deleting…' : 'Delete pin'}
-                      </button>
-                    </span>
-                  ) : null}
                   <button
                     type="button"
                     className="exp-lab-btn exp-lab-btn--primary"
                     onClick={() => void onPostAppend()}
-                    disabled={!appendText.trim() || savingAppend || deleting || savingEdit || Boolean(deletingEntryId)}
+                    disabled={!appendText.trim() || threadBusy}
                   >
                     {savingAppend ? 'Posting…' : 'Post feedback'}
                   </button>

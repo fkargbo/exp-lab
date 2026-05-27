@@ -94,10 +94,11 @@ export function removeLocalPinEntry(projectId: string, pinId: string, entryId: s
     const prev = getPinThreadEntries(p);
     const next = prev.filter((e) => e.id !== entryId);
     const last = next[next.length - 1];
+    const cleared = next.length === 0;
     return {
       ...p,
-      comment_entries: next,
-      comment_text: threadBodiesJoined(next),
+      comment_entries: cleared ? [] : next,
+      comment_text: cleared ? '' : threadBodiesJoined(next),
       author_name: last?.author_name ?? p.author_name,
       author_avatar_url: last?.author_avatar_url ?? p.author_avatar_url,
       author_github_id: last?.author_github_id ?? p.author_github_id,

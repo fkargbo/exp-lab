@@ -892,8 +892,20 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       }
 
       const merged = entries.filter((e) => e.id !== entryId);
-      const joined = threadBodiesJoined(merged);
+      const cleared = merged.length === 0;
+      const joined = cleared ? '' : threadBodiesJoined(merged);
       const last = merged[merged.length - 1];
+      const updatedPin: FeedbackPinRecord = {
+        ...pin,
+        comment_entries: cleared ? [] : merged,
+        comment_text: joined,
+        author_name: last?.author_name ?? pin.author_name,
+        author_avatar_url: last?.author_avatar_url ?? pin.author_avatar_url,
+        author_github_id: last?.author_github_id ?? pin.author_github_id,
+      };
+
+      setSelectedPin((prev) => (prev && prev.id === pinId ? updatedPin : prev));
+      setPins((prev) => prev.map((p) => (p.id === pinId ? updatedPin : p)));
 
       if (!supabase) {
         removeLocalPinEntry(projectId, pinId, entryId);
@@ -908,7 +920,7 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
       const { error } = await supabase
         .from('feedback_pins')
         .update({
-          comment_entries: merged,
+          comment_entries: cleared ? [] : merged,
           comment_text: joined,
           author_name: last?.author_name ?? pin.author_name,
           author_avatar_url: last?.author_avatar_url ?? pin.author_avatar_url,
@@ -916,20 +928,10 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
         })
         .eq('id', pinId);
       if (error) {
+        setSelectedPin((prev) => (prev && prev.id === pinId ? pin : prev));
+        setPins((prev) => prev.map((p) => (p.id === pinId ? pin : p)));
         throw new Error(error.message);
       }
-      setSelectedPin((prev) =>
-        prev && prev.id === pinId
-          ? {
-              ...prev,
-              comment_entries: merged,
-              comment_text: joined,
-              author_name: last?.author_name ?? pin.author_name,
-              author_avatar_url: last?.author_avatar_url ?? pin.author_avatar_url,
-              author_github_id: last?.author_github_id ?? pin.author_github_id,
-            }
-          : prev,
-      );
       void loadPins();
     },
     [supabase, projectId, pins, selectedPin, user, guestName, loadPins],

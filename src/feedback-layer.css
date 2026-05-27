@@ -473,16 +473,13 @@
 }
 
 .exp-lab-entry-overflow__panel {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 2px);
   min-width: 120px;
   padding: 4px 0;
   background: #fff;
   border: 1px solid var(--exp-lab-border);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  z-index: 20;
+  /* position/top/left set inline when portaled to document.body */
 }
 
 .exp-lab-entry-overflow__item {
