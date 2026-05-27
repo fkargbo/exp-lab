@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import type { FeedbackPinRecord } from '../types';
 import { useExpLab } from '../context/ExpLabContext';
 import { getPinChrome } from '../lib/authorPinColor';
-import { resolvePinMarkerLayout } from '../lib/pinAnchor';
+import { pinUsesChromeLayer, resolvePinMarkerLayout } from '../lib/pinAnchor';
 import { getPinMarkerAuthor } from '../lib/pinThread';
 
 function initials(name: string | null): string {
@@ -94,19 +94,49 @@ function PinMarker({ pin, onOpen }: { pin: FeedbackPinRecord; onOpen: (p: Feedba
   );
 }
 
+function PinMarkers({ pins, onOpen }: { pins: FeedbackPinRecord[]; onOpen: (p: FeedbackPinRecord) => void }) {
+  return (
+    <>
+      {pins.map((p) => (
+        <PinMarker key={p.id} pin={p} onOpen={onOpen} />
+      ))}
+    </>
+  );
+}
+
 export function PinLayer() {
   const { pins, openPinDetail, feedbackMode } = useExpLab();
-  const root = typeof document !== 'undefined' ? document.getElementById('exp-lab-pin-root') : null;
-  if (!root || !feedbackMode) {
+
+  const { contentPins, chromePins } = useMemo(() => {
+    const content: FeedbackPinRecord[] = [];
+    const chrome: FeedbackPinRecord[] = [];
+    for (const pin of pins) {
+      if (pinUsesChromeLayer(pin)) {
+        chrome.push(pin);
+      } else {
+        content.push(pin);
+      }
+    }
+    return { contentPins: content, chromePins: chrome };
+  }, [pins]);
+
+  const contentRoot =
+    typeof document !== 'undefined' ? document.getElementById('exp-lab-pin-root') : null;
+  const chromeRoot =
+    typeof document !== 'undefined' ? document.getElementById('exp-lab-pin-root-chrome') : null;
+
+  if (!feedbackMode) {
     return null;
   }
 
-  return createPortal(
+  return (
     <>
-      {pins.map((p) => (
-        <PinMarker key={p.id} pin={p} onOpen={openPinDetail} />
-      ))}
-    </>,
-    root,
+      {contentRoot && contentPins.length > 0
+        ? createPortal(<PinMarkers pins={contentPins} onOpen={openPinDetail} />, contentRoot)
+        : null}
+      {chromeRoot && chromePins.length > 0
+        ? createPortal(<PinMarkers pins={chromePins} onOpen={openPinDetail} />, chromeRoot)
+        : null}
+    </>
   );
 }

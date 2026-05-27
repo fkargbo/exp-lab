@@ -180,6 +180,8 @@ export function percentToRootLocal(
 }
 
 const PIN_LAYER_ID = 'exp-lab-pin-root';
+/** Viewport/chrome pins (masthead, sidebar) — must not live inside a scrolling content box. */
+const CHROME_PIN_LAYER_ID = 'exp-lab-pin-root-chrome';
 const INTERACTION_LAYER_ID = 'exp-lab-interaction-root';
 
 export function syncInteractionLayerToViewport(): void {
@@ -230,11 +232,47 @@ function syncPinLayerToAnnotationRoot(root: HTMLElement = resolveScrollableAnnot
     width: `${width}px`,
     height: `${height}px`,
     boxSizing: 'border-box',
+    overflow: 'visible',
+  });
+}
+
+function ensureChromePinLayerElement(): HTMLElement | null {
+  let el = document.getElementById(CHROME_PIN_LAYER_ID);
+  if (el) {
+    return el;
+  }
+  el = document.createElement('div');
+  el.id = CHROME_PIN_LAYER_ID;
+  Object.assign(el.style, {
+    pointerEvents: 'none',
+    zIndex: '2147483646',
+  });
+  document.body.appendChild(el);
+  return el;
+}
+
+function syncChromePinLayer(): void {
+  const el = ensureChromePinLayerElement();
+  if (!el) {
+    return;
+  }
+  if (el.parentElement !== document.body) {
+    document.body.appendChild(el);
+  }
+  Object.assign(el.style, {
+    position: 'fixed',
+    left: '0',
+    top: '0',
+    width: '100vw',
+    height: '100vh',
+    boxSizing: 'border-box',
+    overflow: 'visible',
   });
 }
 
 export function syncAnnotationSurfaceLayers(root: HTMLElement = resolveScrollableAnnotationRoot()): void {
   syncInteractionLayerToViewport();
+  syncChromePinLayer();
   syncPinLayerToAnnotationRoot(root);
 }
 
@@ -273,9 +311,8 @@ export function subscribeAnnotationSurfaceSync(onSync?: () => void): void {
 }
 
 export function setPinLayerPlacementMode(placing: boolean): void {
-  const el = document.getElementById(PIN_LAYER_ID);
-  if (!el) {
-    return;
+  for (const id of [PIN_LAYER_ID, CHROME_PIN_LAYER_ID]) {
+    const el = document.getElementById(id);
+    el?.classList.toggle('exp-lab-pin-root--placing', placing);
   }
-  el.classList.toggle('exp-lab-pin-root--placing', placing);
 }

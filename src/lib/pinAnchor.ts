@@ -5,6 +5,7 @@ const EXP_LAB_LAYER_IDS = new Set([
   'exp-lab-feedback-host',
   'exp-lab-interaction-root',
   'exp-lab-pin-root',
+  'exp-lab-pin-root-chrome',
   'exp-lab-portal-styles',
 ]);
 
@@ -32,7 +33,11 @@ function isExpLabChromeElement(el: Element): boolean {
     if (EXP_LAB_LAYER_IDS.has(el.id)) {
       return true;
     }
-    if (el.closest('#exp-lab-feedback-host, #exp-lab-interaction-root, #exp-lab-pin-root')) {
+    if (
+      el.closest(
+        '#exp-lab-feedback-host, #exp-lab-interaction-root, #exp-lab-pin-root, #exp-lab-pin-root-chrome',
+      )
+    ) {
       return true;
     }
   }
@@ -133,6 +138,26 @@ export function isPointerInContentRoot(
   return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
 }
 
+/** Pins on masthead/sidebar/chrome render in the body-mounted layer, not the scroll content box. */
+export function pinUsesChromeLayer(pin: FeedbackPinRecord): boolean {
+  if (pin.coordinate_space === 'viewport') {
+    return true;
+  }
+  if (!pin.anchor_selector || pin.anchor_x_pct == null || pin.anchor_y_pct == null) {
+    return false;
+  }
+  const root = resolveScrollableAnnotationRoot();
+  try {
+    const el = document.querySelector(pin.anchor_selector);
+    if (el instanceof HTMLElement && !root.contains(el)) {
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
 /** Resolve pin display — prefers element anchor, then content/viewport %. */
 export function resolvePinMarkerLayout(
   pin: FeedbackPinRecord,
@@ -190,7 +215,7 @@ function resolveAnchoredDisplay(pin: FeedbackPinRecord, root: HTMLElement): PinD
       const regionLeft = markerX - regionW / 2;
       const regionTop = markerY - regionH / 2;
       return {
-        position: 'fixed',
+        position: 'absolute',
         marker: { left: `${markerX}px`, top: `${markerY}px` },
         region: {
           left: `${regionLeft}px`,
@@ -202,7 +227,7 @@ function resolveAnchoredDisplay(pin: FeedbackPinRecord, root: HTMLElement): PinD
     }
 
     return {
-      position: 'fixed',
+      position: 'absolute',
       marker: { left: `${markerX}px`, top: `${markerY}px` },
     };
   }
@@ -263,7 +288,7 @@ function resolveViewportPercentDisplay(pin: FeedbackPinRecord): PinDisplayLayout
     const centerX = pin.x_pct + pin.w_pct / 2;
     const centerY = pin.y_pct + pin.h_pct / 2;
     return {
-      position: 'fixed',
+      position: 'absolute',
       marker: { left: `${centerX}vw`, top: `${centerY}vh` },
       region: {
         left: `calc(${centerX}vw - ${pin.w_pct / 2}vw)`,
@@ -275,7 +300,7 @@ function resolveViewportPercentDisplay(pin: FeedbackPinRecord): PinDisplayLayout
   }
 
   return {
-    position: 'fixed',
+    position: 'absolute',
     marker: { left: `${pin.x_pct}vw`, top: `${pin.y_pct}vh` },
   };
 }

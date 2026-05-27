@@ -532,7 +532,9 @@
 
 /* While placing a new pin, existing markers must not steal clicks from the capture layer. */
 #exp-lab-pin-root.exp-lab-pin-root--placing,
-#exp-lab-pin-root.exp-lab-pin-root--placing .exp-lab-pin-label {
+#exp-lab-pin-root.exp-lab-pin-root--placing .exp-lab-pin-label,
+#exp-lab-pin-root-chrome.exp-lab-pin-root--placing,
+#exp-lab-pin-root-chrome.exp-lab-pin-root--placing .exp-lab-pin-label {
   pointer-events: none;
 }
 
