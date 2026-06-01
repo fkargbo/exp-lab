@@ -12,14 +12,29 @@ export function getProjectId(): string {
 }
 
 /**
+ * Strip the `prototype` query param from a search string.
+ * The `prototype` param is load-time metadata only — it does not change which page the user
+ * is on. Removing it ensures that the direct URL and the shareable URL (which appends
+ * `?prototype=<id>`) resolve to the same page scope.
+ */
+function withoutPrototypeParam(search: string): string {
+  if (!search) return '';
+  const params = new URLSearchParams(search);
+  params.delete('prototype');
+  const result = params.toString();
+  return result ? `?${result}` : '';
+}
+
+/**
  * Host-agnostic page key stored on every new pin as `page_scope`.
- * Uses the raw pathname so it is consistent across dev / prod within the same environment.
- *   format: `pathname + search + hash`
+ * Uses the pathname + remaining query params (excluding `prototype`) so that the direct
+ * URL and the shareable URL (`?prototype=<id>`) map to the same scope.
+ *   format: `pathname + search (without ?prototype) + hash`
  */
 export function getPageScope(): string {
   const { pathname, search, hash } = window.location;
   const path = pathname.endsWith('/') && pathname.length > 1 ? pathname.slice(0, -1) : pathname;
-  return `${path}${search}${hash}`;
+  return `${path}${withoutPrototypeParam(search)}${hash}`;
 }
 
 /** Whether a loaded pin belongs to the page currently visible in the browser. */
@@ -28,14 +43,22 @@ export function pinMatchesPageScope(pin: FeedbackPinRecord): boolean {
 
   // Authoritative: explicit page_scope captured at placement time.
   if (pin.page_scope?.trim()) {
-    return pin.page_scope.trim() === current;
+    // Strip prototype param from stored scope too, in case older pins captured it.
+    try {
+      const u = new URL(pin.page_scope.trim(), 'http://x');
+      const stored = u.pathname + withoutPrototypeParam(u.search) + u.hash;
+      const storedNorm = stored.endsWith('/') && stored.length > 1 ? stored.slice(0, -1) : stored;
+      return storedNorm === current;
+    } catch {
+      return pin.page_scope.trim() === current;
+    }
   }
 
   // Fallback 1: prototype_url — full URL saved at submit time.
   if (pin.prototype_url) {
     try {
       const u = new URL(pin.prototype_url, window.location.origin);
-      const sig = u.pathname + u.search + u.hash;
+      const sig = u.pathname + withoutPrototypeParam(u.search) + u.hash;
       const sigNorm = sig.endsWith('/') && sig.length > 1 ? sig.slice(0, -1) : sig;
       return sigNorm === current;
     } catch {
@@ -48,8 +71,15 @@ export function pinMatchesPageScope(pin: FeedbackPinRecord): boolean {
   const slash = pid.indexOf('/');
   if (slash >= 0) {
     const rest = pid.slice(slash);
-    const restNorm = rest.endsWith('/') && rest.length > 1 ? rest.slice(0, -1) : rest;
-    return restNorm === current;
+    try {
+      const u = new URL(rest, 'http://x');
+      const sig = u.pathname + withoutPrototypeParam(u.search) + u.hash;
+      const sigNorm = sig.endsWith('/') && sig.length > 1 ? sig.slice(0, -1) : sig;
+      return sigNorm === current;
+    } catch {
+      const restNorm = rest.endsWith('/') && rest.length > 1 ? rest.slice(0, -1) : rest;
+      return restNorm === current;
+    }
   }
 
   return false;
