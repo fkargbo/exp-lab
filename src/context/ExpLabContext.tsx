@@ -46,7 +46,7 @@ import {
 import { getReadPinIds, markPinsRead } from '../lib/feedbackReadState';
 import { getStoredGuestName, resolveGuestDisplayName, setStoredGuestName } from '../lib/storage';
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
-import { getOAuthRedirectUrl } from '../lib/oauthRedirect';
+import { getOAuthRedirectUrl, restoreReturnSearchAfterOAuth, saveReturnSearchBeforeOAuth } from '../lib/oauthRedirect';
 import {
   getAnnotationContentSize,
   pointerToPercent,
@@ -339,6 +339,11 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
+      // After a successful OAuth sign-in, restore the ?prototype= param if the GitHub Pages
+      // 404-redirect script or Supabase's PKCE callback dropped it from the URL.
+      if (_event === 'SIGNED_IN') {
+        setTimeout(() => restoreReturnSearchAfterOAuth(), 0);
+      }
     });
     return () => sub.subscription.unsubscribe();
   }, [supabase]);
@@ -694,6 +699,9 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     if (!supabase) {
       return;
     }
+    // Persist the current ?prototype= param before the OAuth redirect so it can be
+    // restored if the GitHub Pages 404-redirect script or Supabase's PKCE callback drops it.
+    saveReturnSearchBeforeOAuth();
     await supabase.auth.signInWithOAuth({
       provider: 'github',
       options: { redirectTo: getOAuthRedirectUrl() },
