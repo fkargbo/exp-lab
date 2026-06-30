@@ -14,18 +14,22 @@
  */
 export function getOAuthRedirectUrl(): string {
   if (typeof window === 'undefined') return '';
-  const pathWithQuery = `${window.location.pathname}${window.location.search}`;
+  // Use pathname ONLY — no query params. Supabase's redirect URL allowlist uses glob patterns
+  // that match paths but not query strings (e.g. `http://localhost:3000/**` won't match
+  // `?prototype=...`). Including query params causes Supabase to reject the redirect URL and
+  // fall back to its Site URL, landing the user on the wrong prototype.
+  // The ?prototype= param is preserved separately via saveReturnSearchBeforeOAuth().
+  const pathnameOnly = window.location.pathname;
   const originBase = import.meta.env.VITE_OAUTH_REDIRECT_ORIGIN?.trim();
   if (originBase) {
     try {
       const base = originBase.endsWith('/') ? originBase : `${originBase}/`;
-      return new URL(pathWithQuery, base).href;
+      return new URL(pathnameOnly, base).href;
     } catch {
       // fall through
     }
   }
-  const { origin, pathname, search } = window.location;
-  return `${origin}${pathname}${search}`;
+  return `${window.location.origin}${pathnameOnly}`;
 }
 
 const OAUTH_RETURN_SEARCH_KEY = 'exp-lab-oauth-return-search';
