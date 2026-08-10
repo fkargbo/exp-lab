@@ -468,6 +468,17 @@ export function ExpLabProvider({ children }: { children: React.ReactNode }) {
     };
   }, [supabase, projectId, loadPins, applyRemotePinChange]);
 
+  /* Publish pins to a window-level bridge so prototype-level panels (running in the main
+     React root) can subscribe without needing access to this shadow-DOM context. */
+  useEffect(() => {
+    type Bridge = { pins: FeedbackPinRecord[]; projectId: string };
+    const w = window as unknown as { __expLabBridge?: Bridge };
+    w.__expLabBridge = { pins, projectId };
+    window.dispatchEvent(
+      new CustomEvent<Bridge>('exp-lab:pins-updated', { detail: { pins, projectId } }),
+    );
+  }, [pins, projectId]);
+
   /* Poll fallback: Realtime often misses rows when project_id is a full URL. */
   useEffect(() => {
     if (!supabase) {
