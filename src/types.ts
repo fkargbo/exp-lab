@@ -13,6 +13,18 @@ export type AuthorInfo = {
   githubId: string | null;
 };
 
+/** One message on a pin thread (multiple users / timestamps per pin). */
+export type FeedbackThreadEntry = {
+  id: string;
+  body: string;
+  author_name: string | null;
+  author_avatar_url: string | null;
+  author_github_id: string | null;
+  created_at: string;
+};
+
+export type PinCoordinateSpace = 'content' | 'viewport';
+
 export type FeedbackPinRecord = {
   id: string;
   project_id: string;
@@ -21,8 +33,20 @@ export type FeedbackPinRecord = {
   y_pct: number;
   w_pct: number | null;
   h_pct: number | null;
+  /** `content` = scrollable prototype canvas; `viewport` = masthead/sidebar/chrome outside canvas. */
+  coordinate_space?: PinCoordinateSpace | null;
+  /** Optional DOM anchor for layout-stable pin position (local + future server). */
+  anchor_selector?: string | null;
+  anchor_x_pct?: number | null;
+  anchor_y_pct?: number | null;
+  /** Denormalized join of thread bodies; kept for search / legacy. Prefer `comment_entries`. */
   comment_text: string;
+  /** When present and non-empty, authoritative thread; otherwise derive from `comment_text` + pin author. */
+  comment_entries?: FeedbackThreadEntry[] | null;
   prototype_url: string | null;
+  /** Router path + query + hash where the pin was placed (`getPageScopeSignature()`). */
+  page_scope?: string | null;
+  /** Original pin author; also updated to latest poster for simple consumers (e.g. map tint). */
   author_name: string | null;
   author_avatar_url: string | null;
   author_github_id: string | null;

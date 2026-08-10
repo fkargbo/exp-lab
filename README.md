@@ -60,11 +60,32 @@ Without Supabase env vars, feedback is still **saved locally** in the browser (`
 ### Identity
 
 - **GitHub**: Configure **GitHub** as an OAuth provider in Supabase Auth. Reviewers use **Sign in with GitHub** in the comment dialog; avatar and name come from `user_metadata`.
+
+#### GitHub Pages: avoid redirect to `localhost`
+
+Supabase only redirects the browser back to URLs you allow. The ExP-Lab bundle sends `redirectTo` as **`VITE_OAUTH_REDIRECT_ORIGIN` + current `pathname` + `search`** when that env var is set at build (GitHub Actions sets it to `https://<your-github-username>.github.io` by default). Otherwise it uses `window.location.origin` + path. If that final URL is **not** allow-listed, Supabase falls back to **Site URL** — often still `http://localhost:3000` — so you land on localhost with tokens in the hash.
+
+Do all of the following in the Supabase dashboard (**Authentication → URL Configuration**):
+
+1. **Redirect URLs** — add (at least) one line that matches your hosted app, for example:
+   - `https://fkargbo.github.io/ux-prototypes/**`
+2. **Site URL** — set to your real public entry, for example:
+   - `https://fkargbo.github.io/ux-prototypes/`
+   so even fallbacks are not `localhost`.
+3. Keep local dev working, for example:
+   - `http://localhost:3000/**`
+
+Save, wait a minute, redeploy **`feedback-layer.js`** (parent repo Pages build runs `exp-lab` with the env vars above), hard-refresh the prototype, then try **Sign in with GitHub** again.
+
 - **Guest**: If not signed in, the first comment asks for a **display name** (stored in `localStorage`).
 
 ### `project_id`
 
-Computed as `location.hostname + location.pathname` (query/hash ignored) so each prototype route is scoped automatically.
+Computed from the current browser location: **hostname + pathname + search + hash** (pathname trailing slash normalized). Pins are scoped to that string so **each prototype page** (including SPA route changes and hash routes) has its own thread of feedback.
+
+The layer **re-subscribes** when the URL changes (`popstate`, `hashchange`, and `history.pushState` / `replaceState`) so client-side navigation loads the correct pins without a full reload.
+
+**Note:** Changing this format re-scopes storage keys and Supabase rows; older pins stored under the previous `project_id` shape will not appear until migrated.
 
 ### GitHub Pages SPA routing
 
@@ -86,8 +107,9 @@ The handler expects a Supabase webhook-style JSON body with a `record` object.
 
 ## Architecture notes
 
-- **Shadow DOM** hosts toast/dialog so styles stay isolated; **portaled** layers (`exp-lab-pin-root`, `exp-lab-interaction-root`) live on `document.body` for full-page coordinates — the same stylesheet is injected into `document.head` for those layers.
-- Coordinates are stored as **percentages** of document width/height so pins survive resize.
+- **Shadow DOM** hosts toast/dialog so styles stay isolated; **portaled** layers (`exp-lab-pin-root`, `exp-lab-interaction-root`) align to an **annotation root** element for full-page coordinates — the same stylesheet is injected into `document.head` for those layers.
+- Coordinates are stored as **percentages of the annotation root** (not the viewport) so pins and region highlights stay aligned when the window is resized.
+- Host prototypes can mark the stable layout box with **`data-exp-lab-annotation-root`** (e.g. the max-width content column). Resolution order: that attribute → `main[role="main"]` → PatternFly page main → `document.documentElement`.
 
 ## Testing inside this repo (Observability Agentic prototype)
 
@@ -96,7 +118,7 @@ The **Observability Agentic Troubleshooting AI** prototype loads ExP-Lab automat
 | Environment | Script URL |
 |-------------|------------|
 | **Local dev** (`npm start`) | `http://localhost:<port>/feedback-layer.js` |
-| **GitHub Pages** | `https://<host>/HPUX-Prototypes/feedback-layer.js` |
+| **GitHub Pages** | `https://<user>.github.io/<repo>/feedback-layer.js` (repo name is the path segment) |
 
 **Dev server:** after `cd exp-lab && npm run build`, webpack serves **`exp-lab/dist/feedback-layer.js`** automatically (see `webpack.dev.js` — no need to copy into root `dist/` unless you prefer). Restart **`npm start`** if the dev server was already running before you built ExP-Lab.
 
@@ -109,6 +131,8 @@ cp exp-lab/dist/feedback-layer.js dist/feedback-layer.js
 Then start the main app (`npm start` from the repo root). Open the **Observability Agentic Troubleshooting** prototype from the launcher, press **C** to toggle feedback mode.
 
 Put **`VITE_SUPABASE_URL`** and **`VITE_SUPABASE_ANON_KEY`** in `exp-lab/.env` before `npm run build` so the copied bundle can save comments.
+
+**Parent repo (e.g. `ux-prototypes`) on GitHub Actions:** set the same two values as **repository secrets** or as secrets on the **`github-pages` environment** (the deploy workflow’s `build` job uses that environment so the Vite build sees them). If they are missing at build time, the shipped `feedback-layer.js` stays in browser-only mode.
 
 For production deploys, ensure **`feedback-layer.js`** is deployed alongside `index.html` (same folder as the main bundles), e.g. add `cp exp-lab/dist/feedback-layer.js dist/` to your publish step before `gh-pages`.
 

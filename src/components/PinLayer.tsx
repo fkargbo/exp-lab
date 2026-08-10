@@ -1,8 +1,11 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { FeedbackPinRecord } from '../types';
 import { useExpLab } from '../context/ExpLabContext';
 import { getPinChrome } from '../lib/authorPinColor';
+import { pinUsesChromeLayer, resolvePinMarkerLayout } from '../lib/pinAnchor';
+import { pinMatchesPageScope } from '../lib/projectId';
+import { getPinMarkerAuthor } from '../lib/pinThread';
 
 function initials(name: string | null): string {
   if (!name?.trim()) {
@@ -16,33 +19,44 @@ function initials(name: string | null): string {
 }
 
 function PinMarker({ pin, onOpen }: { pin: FeedbackPinRecord; onOpen: (p: FeedbackPinRecord) => void }) {
+  const [layoutTick, setLayoutTick] = useState(0);
+
+  useEffect(() => {
+    const bump = () => setLayoutTick((n) => n + 1);
+    window.addEventListener('resize', bump);
+    window.addEventListener('scroll', bump, true);
+    return () => {
+      window.removeEventListener('resize', bump);
+      window.removeEventListener('scroll', bump, true);
+    };
+  }, []);
+
+  const layout = useMemo(() => resolvePinMarkerLayout(pin), [pin, layoutTick]);
   const chrome = getPinChrome(pin);
-  let leftPct = pin.x_pct;
-  let topPct = pin.y_pct;
-  if (pin.kind === 'region' && pin.w_pct != null && pin.h_pct != null) {
-    leftPct = pin.x_pct + pin.w_pct / 2;
-    topPct = pin.y_pct + pin.h_pct / 2;
+  const markerAuthor = getPinMarkerAuthor(pin);
+
+  if (!layout) {
+    return null;
   }
-  const left = `${leftPct}%`;
-  const top = `${topPct}%`;
 
   const markerStyle: React.CSSProperties = {
-    left,
-    top,
+    position: layout.position,
+    left: layout.marker.left,
+    top: layout.marker.top,
     ...chrome.markerStyle,
-    ...(pin.author_avatar_url ? { padding: 2 } : {}),
   };
 
-  if (pin.kind === 'region' && pin.w_pct != null && pin.h_pct != null) {
+  if (layout.region) {
     return (
       <React.Fragment key={pin.id}>
         <div
           className="exp-lab-region"
           style={{
-            left: `${pin.x_pct}%`,
-            top: `${pin.y_pct}%`,
-            width: `${pin.w_pct}%`,
-            height: `${pin.h_pct}%`,
+            position: layout.position,
+            left: layout.region.left,
+            top: layout.region.top,
+            width: layout.region.width,
+            height: layout.region.height,
             ...chrome.regionStyle,
           }}
         />
@@ -57,10 +71,10 @@ function PinMarker({ pin, onOpen }: { pin: FeedbackPinRecord; onOpen: (p: Feedba
           }}
           aria-label={`Open comment from ${pin.author_name ?? 'Guest'}`}
         >
-          {pin.author_avatar_url ? (
-            <img src={pin.author_avatar_url} alt="" />
+          {markerAuthor.avatarUrl ? (
+            <img src={markerAuthor.avatarUrl} alt="" />
           ) : (
-            initials(pin.author_name)
+            initials(markerAuthor.name)
           )}
         </button>
       </React.Fragment>
@@ -80,24 +94,54 @@ function PinMarker({ pin, onOpen }: { pin: FeedbackPinRecord; onOpen: (p: Feedba
       }}
       aria-label={`Open comment from ${pin.author_name ?? 'Guest'}`}
     >
-      {pin.author_avatar_url ? <img src={pin.author_avatar_url} alt="" /> : initials(pin.author_name)}
+      {markerAuthor.avatarUrl ? <img src={markerAuthor.avatarUrl} alt="" /> : initials(markerAuthor.name)}
     </button>
+  );
+}
+
+function PinMarkers({ pins, onOpen }: { pins: FeedbackPinRecord[]; onOpen: (p: FeedbackPinRecord) => void }) {
+  return (
+    <>
+      {pins.map((p) => (
+        <PinMarker key={p.id} pin={p} onOpen={onOpen} />
+      ))}
+    </>
   );
 }
 
 export function PinLayer() {
   const { pins, openPinDetail, feedbackMode } = useExpLab();
-  const root = typeof document !== 'undefined' ? document.getElementById('exp-lab-pin-root') : null;
-  if (!root || !feedbackMode) {
+
+  const { contentPins, chromePins } = useMemo(() => {
+    const content: FeedbackPinRecord[] = [];
+    const chrome: FeedbackPinRecord[] = [];
+    for (const pin of pins.filter(pinMatchesPageScope)) {
+      if (pinUsesChromeLayer(pin)) {
+        chrome.push(pin);
+      } else {
+        content.push(pin);
+      }
+    }
+    return { contentPins: content, chromePins: chrome };
+  }, [pins]);
+
+  const contentRoot =
+    typeof document !== 'undefined' ? document.getElementById('exp-lab-pin-root') : null;
+  const chromeRoot =
+    typeof document !== 'undefined' ? document.getElementById('exp-lab-pin-root-chrome') : null;
+
+  if (!feedbackMode) {
     return null;
   }
 
-  return createPortal(
+  return (
     <>
-      {pins.map((p) => (
-        <PinMarker key={p.id} pin={p} onOpen={openPinDetail} />
-      ))}
-    </>,
-    root,
+      {contentRoot && contentPins.length > 0
+        ? createPortal(<PinMarkers pins={contentPins} onOpen={openPinDetail} />, contentRoot)
+        : null}
+      {chromeRoot && chromePins.length > 0
+        ? createPortal(<PinMarkers pins={chromePins} onOpen={openPinDetail} />, chromeRoot)
+        : null}
+    </>
   );
 }

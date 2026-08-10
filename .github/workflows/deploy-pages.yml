@@ -1,0 +1,64 @@
+# Build feedback-layer.js with Vite + publish dist/ to GitHub Pages.
+# Add repository secrets VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY on THIS repo.
+name: Deploy ExP-Lab to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - 2026-05-12-pm5r
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: exp-lab-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install and build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "${VITE_SUPABASE_URL}" ]; then
+            echo "::warning::VITE_SUPABASE_URL is empty — bundle will be local-only. Add it under Settings → Secrets and variables → Actions."
+          else
+            echo "VITE_SUPABASE_URL is set."
+          fi
+          if [ -z "${VITE_SUPABASE_ANON_KEY}" ]; then
+            echo "::warning::VITE_SUPABASE_ANON_KEY is empty — bundle will be local-only."
+          else
+            echo "VITE_SUPABASE_ANON_KEY is set."
+          fi
+          npm ci
+          npm run build
+
+      - uses: actions/configure-pages@v4
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

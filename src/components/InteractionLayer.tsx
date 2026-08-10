@@ -2,6 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useExpLab } from '../context/ExpLabContext';
 import { EXP_LAB_COMMENT_CURSOR } from '../lib/commentCursor';
+import { resolveScrollableAnnotationRoot, setPinLayerPlacementMode } from '../lib/annotationSurface';
 
 export function InteractionLayer() {
   const { feedbackMode, dragRect, interactionProps, syncPinLayerHeight, pendingPin, selectedPin } =
@@ -15,25 +16,28 @@ export function InteractionLayer() {
     }
   }, [feedbackMode, syncPinLayerHeight]);
 
+  const placing = feedbackMode && !pendingPin && !selectedPin;
+
   /* Cursor over page chrome while placing pins; clear while dialog is open so inputs use I‑beam. */
   useEffect(() => {
     if (typeof document === 'undefined') {
       return;
     }
     const prev = document.body.style.cursor;
-    const placing = feedbackMode && !pendingPin && !selectedPin;
+    setPinLayerPlacementMode(placing);
     if (placing) {
       document.body.style.cursor = EXP_LAB_COMMENT_CURSOR;
     } else {
       document.body.style.cursor = '';
     }
     return () => {
+      setPinLayerPlacementMode(false);
       document.body.style.cursor = prev;
     };
   }, [feedbackMode, pendingPin, selectedPin]);
 
   const style = useMemo((): React.CSSProperties => {
-    if (!feedbackMode) {
+    if (!feedbackMode || !placing) {
       return { pointerEvents: 'none', cursor: 'default', touchAction: 'auto' as const };
     }
     return {
@@ -41,7 +45,28 @@ export function InteractionLayer() {
       cursor: EXP_LAB_COMMENT_CURSOR,
       touchAction: 'none' as const,
     };
-  }, [feedbackMode]);
+  }, [feedbackMode, placing]);
+
+  const dragMarqueeStyle = useMemo((): React.CSSProperties | null => {
+    if (!dragRect || !feedbackMode) {
+      return null;
+    }
+    const root = resolveScrollableAnnotationRoot();
+    const rootRect = root.getBoundingClientRect();
+    return {
+      position: 'fixed',
+      boxSizing: 'border-box',
+      left: rootRect.left - root.scrollLeft + dragRect.left,
+      top: rootRect.top - root.scrollTop + dragRect.top,
+      width: dragRect.width,
+      height: dragRect.height,
+      border: '2px dashed #0066cc',
+      borderStyle: 'dashed',
+      background: 'rgba(0, 102, 204, 0.1)',
+      borderRadius: 4,
+      pointerEvents: 'none',
+    };
+  }, [dragRect, feedbackMode]);
 
   if (!root) {
     return null;
@@ -53,25 +78,7 @@ export function InteractionLayer() {
       style={style}
       {...interactionProps}
     >
-      {dragRect && feedbackMode ? (
-        <div
-          className="exp-lab-drag-marquee"
-          style={{
-            position: 'absolute',
-            boxSizing: 'border-box',
-            left: dragRect.left,
-            top: dragRect.top,
-            width: dragRect.width,
-            height: dragRect.height,
-            /* Inline so host app CSS cannot flatten dashed borders to solid */
-            border: '2px dashed #0066cc',
-            borderStyle: 'dashed',
-            background: 'rgba(0, 102, 204, 0.1)',
-            borderRadius: 4,
-            pointerEvents: 'none',
-          }}
-        />
-      ) : null}
+      {dragMarqueeStyle ? <div className="exp-lab-drag-marquee" style={dragMarqueeStyle} /> : null}
     </div>,
     root,
   );

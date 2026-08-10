@@ -14,6 +14,7 @@ create table if not exists public.feedback_pins (
   w_pct double precision,
   h_pct double precision,
   comment_text text not null default '',
+  comment_entries jsonb not null default '[]'::jsonb,
   prototype_url text,
   author_name text,
   author_avatar_url text,
@@ -38,6 +39,7 @@ alter table public.feedback_pins enable row level security;
 drop policy if exists "feedback_pins_select_all" on public.feedback_pins;
 drop policy if exists "feedback_pins_insert_all" on public.feedback_pins;
 drop policy if exists "feedback_pins_delete_all" on public.feedback_pins;
+drop policy if exists "feedback_pins_update_all" on public.feedback_pins;
 
 create policy "feedback_pins_select_all"
   on public.feedback_pins
@@ -49,6 +51,12 @@ create policy "feedback_pins_insert_all"
   for insert
   with check (true);
 
+create policy "feedback_pins_update_all"
+  on public.feedback_pins
+  for update
+  using (true)
+  with check (true);
+
 create policy "feedback_pins_delete_all"
   on public.feedback_pins
   for delete
@@ -56,7 +64,7 @@ create policy "feedback_pins_delete_all"
 
 -- Browser clients use the anon key — grant table access explicitly.
 grant usage on schema public to anon, authenticated;
-grant select, insert, delete on table public.feedback_pins to anon, authenticated;
+grant select, insert, update, delete on table public.feedback_pins to anon, authenticated;
 
 -- -----------------------------------------------------------------------------
 -- Realtime: subscribe to INSERTs from the embed (repeat run is OK if already added).
